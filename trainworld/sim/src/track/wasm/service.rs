@@ -135,6 +135,38 @@ impl TrackApi {
             })
             .collect()
     }
+
+    /// Per internal run: first stop, last stop, parent offset and length.
+    /// Empty when the logical run has no internal runs.
+    pub fn run_leg_info(&self, line: u32, run: usize) -> Vec<f64> {
+        let Some(ls) = self.w.svc.lines.get(line as usize).filter(|l| l.ok) else { return vec![] };
+        let Some(r) = ls.runs.get(run) else { return vec![] };
+
+        r.legs.iter().flat_map(|leg| [
+            leg.first_stop as f64,
+            leg.last_stop as f64,
+            leg.offset,
+            leg.run.len,
+        ]).collect()
+    }
+
+    /// One internal run's path, sampled like run_polyline.
+    /// Use the parent run's real track geometry, including curves.
+    pub fn run_leg_polyline(&self, line: u32, run: usize, leg: usize, step: f64) -> Vec<f64> {
+        if !step.is_finite() || step <= 0.0 { return vec![]; }
+        let Some(ls) = self.w.svc.lines.get(line as usize).filter(|l| l.ok) else { return vec![] };
+        let Some(r) = ls.runs.get(run) else { return vec![] };
+        let Some(part) = r.legs.get(leg) else { return vec![] };
+
+        let len = part.run.len;
+        let n = (len / step).ceil() as usize;
+        (0..=n).flat_map(|i| {
+            let s = part.offset + (i as f64 * step).min(len);
+            let (x, y) = self.w.svc.position(&self.w.net, line, run, s);
+            [x, y]
+        }).collect()
+    }
+
     /// T-3346: the departures board. Line `line`'s trains leaving station node `node` in
     /// `[t0, t1)`, game seconds: per departure its run, the stop's index in that run and the time
     /// it leaves (its trip's `draw` plus its profile's `dep` there), sorted by time. A run's last

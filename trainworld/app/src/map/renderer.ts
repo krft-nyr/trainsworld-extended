@@ -40,6 +40,25 @@ export type { StationGroups, DrawOptions, NetworkLayers } from "./rendererParts"
 import { texture, buffer, attrib, strokes, checkStrokes, checkFull, dropLod, rewrite } from "./rendererStrokes";
 import { drawFrame, bindTrainTextures } from "./rendererDraw";
 
+/** Texture rows: directional-run heads followed by two rows for each ordinary RunLeg. */
+function runLegData(n: NetworkBuffers): Float32Array {
+  const heads = n.runLegHeads ?? new Float32Array(0), table = n.runLegTable ?? new Float32Array(0);
+  const headCount = heads.length / 2, legCount = table.length / 6;
+  const out = new Float32Array(Math.max(1, headCount + legCount * 2) * 4);
+  for (let i = 0; i < headCount; i++) out.set(heads.subarray(i * 2, i * 2 + 2), i * 4);
+  for (let i = 0; i < headCount; i++) {
+    const first = heads[i * 2], count = heads[i * 2 + 1];
+    let offset = 0;
+    for (let j = first; j < first + count; j++) {
+      const k = j * 6;
+      out.set(table.subarray(k, k + 4), (headCount + j * 2) * 4);
+      out.set([offset, table[k + 4], table[k + 5], 0], (headCount + j * 2 + 1) * 4);
+      offset += table[k + 2];
+    }
+  }
+  return out;
+}
+
 // WebGL2 network renderer: track and line strokes (one instanced quad per polyline segment, a
 // casing under the colour, the theme's (T-039); blueprint solid, lighter and without casing, T-311), stations (platforms along the track, or
 // dots zoomed out, T-189), the drawing tool's preview,
@@ -115,8 +134,7 @@ export class NetworkRenderer {
   profitTex: WebGLTexture | null = null;
   profitN = 0;
   profitData: Float32Array | null = null;
-  tex: Record<TexName, WebGLTexture | null> = { phases: null, meta: null, samples: null, lines: null, colours: null, fill: null, cars: null, stretch: null, stationLine: null, lane: null, slevel: null };
-  /** The boarding account's hour the trip buffer holds (T-164), or null before demand has riders. */
+  tex: Record<TexName, WebGLTexture | null> = { phases: null, meta: null, samples: null, lines: null, legData: null, legSamples: null, colours: null, fill: null, cars: null, stretch: null, stationLine: null, lane: null, slevel: null };  /** The boarding account's hour the trip buffer holds (T-164), or null before demand has riders. */
   board: BoardHour | null = null;
   crowds = new PlatformCrowds(0);
   crowdBuf: WebGLBuffer | null = null;
@@ -500,7 +518,7 @@ export class NetworkRenderer {
     this.selProg = compile(gl, SEL_VS, SEL_FS);
     this.selU = uniforms(gl, this.selProg, ["u_bbox", "u_css", "u_shapes", "u_count", "u_dpr", "u_height", "u_ink", "u_outline", "u_glow"]);
     this.selTex = texture(this, this.selData, "rgba32f", SEL_MAX * SEL_STRIDE, []);
-    this.trainU = uniforms(gl, this.trainProg, [...PROJECT_UNIFORMS, "u_viewport", "u_time", "u_px_per_unit", "u_min_px", "u_phases", "u_meta", "u_samples", "u_lines", "u_back_base", "u_line_colours", "u_fill", "u_bad", "u_detail", "u_dpr", "u_cars", "u_loads", "u_stretch", "u_sel_line", "u_sel_n", "u_sel_set", "u_dim", "u_sel_trip", "u_pass", "u_ink", "u_band", "u_psi0", "u_lane_tex", "u_lane", "u_hollow", "u_bands", "u_bands_m", "u_passing", "u_keep", "u_level_hide", "u_slevel"]);
+    this.trainU = uniforms(gl, this.trainProg, [...PROJECT_UNIFORMS, "u_viewport", "u_time", "u_px_per_unit", "u_min_px", "u_phases", "u_meta", "u_samples", "u_lines", "u_leg_data", "u_leg_samples", "u_leg_base", "u_back_base", "u_line_colours", "u_fill", "u_bad", "u_detail", "u_dpr", "u_cars", "u_loads", "u_stretch", "u_sel_line", "u_sel_n", "u_sel_set", "u_dim", "u_sel_trip", "u_pass", "u_ink", "u_band", "u_psi0", "u_lane_tex", "u_lane", "u_hollow", "u_bands", "u_bands_m", "u_passing", "u_keep", "u_level_hide", "u_slevel"]);
     this.timer = new GpuTimer(gl);
     this.tripBuf = gl.createBuffer();
     this.endBuf = gl.createBuffer();
@@ -698,6 +716,8 @@ export class NetworkRenderer {
     for (let i = 0; i < n.stationCount && !this.passing; i++) this.passing = (n.stations[i * 3 + 2] & ST_PASSING) !== 0;
     if (hadTraffic || passChanged || !(same.has("sampleLane") && same.has("sampleBand") && this.tex.lane)) this.putLane(n);
     put("lines", "lineTable", () => [n.lineTable.length ? n.lineTable : new Float32Array(4), "rgba32f", LINES_W]);
+    put("legData", ["runLegHeads", "runLegTable"], () => [runLegData(n), "rgba32f", TEX_W]);
+    put("legSamples", "runLegSamples", () => [n.runLegSamples?.length ? n.runLegSamples : new Float32Array(2), "rg32f", TEX_W]);
     put("colours", "lineColours", () => [this.shownColours(n), "rgba8", LINES_W]);
     this.hiddenFor = null;
     put("fill", null, () => [new Float32Array(Math.max(1, n.samples.length / 2) * 2).fill(-1), "rg32f", TEX_W]);
@@ -1119,7 +1139,7 @@ export class NetworkRenderer {
     const gl = this.gl;
     if (!this.probeProg) {
       this.probeProg = compile(gl, PROBE_VS, PROBE_FS, ["v_pos"]);
-      this.probeU = uniforms(gl, this.probeProg, ["u_time", "u_phases", "u_meta", "u_samples", "u_lines", "u_back_base"]);
+      this.probeU = uniforms(gl, this.probeProg, ["u_time", "u_phases", "u_meta", "u_samples", "u_lines", "u_leg_data", "u_leg_samples", "u_leg_base", "u_back_base"]);
     }
     this.releaseStaged(time);
     const uTime = this.sync(time);

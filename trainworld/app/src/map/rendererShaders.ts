@@ -880,6 +880,9 @@ uniform highp sampler2D u_phases;  // RGBA32F: t, s, v, a
 uniform highp sampler2D u_meta;    // RGBA32F per profile: first phase, count, trip s, length m
 uniform highp sampler2D u_samples; // RG32F: run 0 of each line, x/y local units
 uniform highp sampler2D u_lines;   // RGBA32F per line: first sample, count, length m, step m
+uniform highp sampler2D u_leg_data; // RGBA32F: run heads, then geometry and offset for each internal Run
+uniform highp sampler2D u_leg_samples; // RG32F: ordinary internal Run geometry
+uniform int u_leg_base; // number of directional-run heads before leg records
 uniform int u_back_base;           // T-3250: lines in the table (0 none); row base + line is that line's return run on its own way back, where it has one
 in vec2 a_trip;              // profile, departure - epoch (s)
 in float a_end;              // drawn until - epoch (s): standing at the terminal for its next departure (T-206)
@@ -892,6 +895,18 @@ float g_stand = -1.0;
 // set by trainDist: a return run drawn along its own way back (T-3250), as a run 0 of its own row
 bool g_own = false;
 
+bool g_leg = false;
+bool g_leg_first = false, g_leg_last = false, g_leg_back = false;
+float g_leg_offset = 0.0;
+vec4 g_parent_line = vec4(0.0);
+
+/** The ordinary leg's distance expressed along the original line's samples. */
+float sampleD(float d) {
+  float s = g_leg_offset + d;
+  return !g_leg ? d : g_leg_back ? g_parent_line.z - s : s;
+}
+vec4 sampleL(vec4 L) { return g_leg ? g_parent_line : L; }
+
 /** The point at distance d (m) along run 0 of a line (L from the line table). */
 vec2 lineAt(vec4 L, float d) {
   float first = L.x, count = L.y, len = L.z, step = L.w;
@@ -900,8 +915,8 @@ vec2 lineAt(vec4 L, float d) {
   float seg = max(min(step, len - i0 * step), 1e-3);
   float f = clamp((dd - i0 * step) / seg, 0.0, 1.0);
   int si = int(first + i0);
-  vec2 p0 = texelFetch(u_samples, tc(si, ${TEX_W}), 0).xy;
-  vec2 p1 = texelFetch(u_samples, tc(si + 1, ${TEX_W}), 0).xy;
+  vec2 p0 = g_leg ? texelFetch(u_leg_samples, tc(si, ${TEX_W}), 0).xy : texelFetch(u_samples, tc(si, ${TEX_W}), 0).xy;
+  vec2 p1 = g_leg ? texelFetch(u_leg_samples, tc(si + 1, ${TEX_W}), 0).xy : texelFetch(u_samples, tc(si + 1, ${TEX_W}), 0).xy;
   return mix(p0, p1, f);
 }
 
@@ -934,6 +949,35 @@ bool trainDist(out vec4 L, out float d, out int line) {
   if (run == 1 && u_back_base > 0 && line < u_back_base) {
     vec4 B = texelFetch(u_lines, tc(u_back_base + line, ${LINES_W}), 0);
     if (B.y > 1.5) { L = B; d = s; g_own = true; }
+  }
+  g_parent_line = L;
+  g_leg_back = run == 1 && !g_own;
+  if (u_leg_base > 0) {
+    int head = line * 2 + run;
+    if (head < u_leg_base) {
+      vec4 H = texelFetch(u_leg_data, tc(head, ${TEX_W}), 0);
+      int first = int(H.x + 0.5), count = int(H.y + 0.5);
+      if (count > 0) {
+        int loLeg = first, hiLeg = first + count - 1;
+        for (int k = 0; k < 16; k++) {
+          if (loLeg >= hiLeg) break;
+          int mid = (loLeg + hiLeg + 1) / 2;
+          float at = texelFetch(u_leg_data, tc(u_leg_base + mid * 2 + 1, ${TEX_W}), 0).x;
+          if (at <= s) loLeg = mid; else hiLeg = mid - 1;
+        }
+        vec4 G = texelFetch(u_leg_data, tc(u_leg_base + loLeg * 2, ${TEX_W}), 0);
+        if (G.y > 1.5) {
+          vec4 R = texelFetch(u_leg_data, tc(u_leg_base + loLeg * 2 + 1, ${TEX_W}), 0);
+          g_leg = true;
+          g_leg_offset = R.x;
+          g_leg_first = loLeg == first;
+          g_leg_last = loLeg == first + count - 1;
+          L = G;
+          d = s - g_leg_offset;
+          g_own = true;
+        }
+      }
+    }
   }
   return true;
 }`;
@@ -990,11 +1034,12 @@ flat out float v_boat;
 /** How far apart the two tracks are at distance d along run 0 (laneAt in network.ts), the
  * line's band's shift and metres there (bandAt), and m past a passing platform it stops at (T-2233). */
 vec4 laneAt(vec4 L, float d) {
-  float dd = clamp(d, 0.0, L.z);
-  float i0 = clamp(floor(dd / L.w), 0.0, max(L.y - 2.0, 0.0));
-  float f = clamp((dd - i0 * L.w) / max(min(L.w, L.z - i0 * L.w), 1e-3), 0.0, 1.0);
-  int si = int(L.x + i0);
-  return mix(texelFetch(u_lane_tex, tc(si, ${TEX_W}), 0), texelFetch(u_lane_tex, tc(si + (L.y > 1.5 ? 1 : 0), ${TEX_W}), 0), f);
+  vec4 S = sampleL(L);
+  float dd = clamp(sampleD(d), 0.0, S.z);
+  float i0 = clamp(floor(dd / S.w), 0.0, max(S.y - 2.0, 0.0));
+  float f = clamp((dd - i0 * S.w) / max(min(S.w, S.z - i0 * S.w), 1e-3), 0.0, 1.0);
+  int si = int(S.x + i0);
+  return mix(texelFetch(u_lane_tex, tc(si, ${TEX_W}), 0), texelFetch(u_lane_tex, tc(si + (S.y > 1.5 ? 1 : 0), ${TEX_W}), 0), f);
 }
 /** A train's shift across, px: on its own track (T-658), or \`across\` of the way to it (-1 the other
  * track, T-2980), its band (T-1799, T-2132), and onto a passing station's outer track where it stops
@@ -1027,14 +1072,17 @@ vec2 lineAtX(vec4 L, float d) {
  * behind it, or into a terminal's siding and out to the other platform. */
 float acrossAt(float x, float trainM) {
   float q = g_run == 0 ? g_len - x : x, r = g_run == 0 ? x : g_len - x;
-  float sc = a_bay.x < 0.0 ? -1.0 : mod(a_bay.x, 4.0), ec = a_bay.z < 0.0 ? -1.0 : mod(a_bay.z, 4.0);
+  float sv = g_leg && g_leg_back ? a_bay.z : a_bay.x;
+  float ev = g_leg && g_leg_back ? a_bay.x : a_bay.z;
+  float sc = g_leg && !g_leg_first ? -1.0 : sv < 0.0 ? -1.0 : mod(sv, 4.0);
+  float ec = g_leg && !g_leg_last ? -1.0 : ev < 0.0 ? -1.0 : mod(ev, 4.0);
   if (r < q) {
     if (sc < 0.5 || sc > 1.5) return 1.0;
-    float p = max(bayP(a_bay.y), trainM + 5.0);
+    float p = max(bayP(g_leg && g_leg_back ? a_bay.w : a_bay.y), trainM + 5.0);
     return mix(-1.0, 1.0, smoothstep(p, p + ${TURNBACK_M.toFixed(1)}, r));
   }
   if (ec > 0.5 && ec < 1.5) {
-    float p = max(bayP(a_bay.w), trainM + 5.0);
+    float p = max(bayP(g_leg && g_leg_back ? a_bay.y : a_bay.w), trainM + 5.0);
     return mix(-1.0, 1.0, smoothstep(p, p + ${TURNBACK_M.toFixed(1)}, q));
   }
   return 1.0;
@@ -1069,17 +1117,21 @@ void main() {
   int prof = int(a_trip.x + 0.5);
   vec4 M = texelFetch(u_meta, tc(prof, ${TEX_W}), 0);
   g_run = g_own ? 0 : (prof / ${PROFILES_PER_RUN}) % 2;
-  g_len = M.w;
-  // T-3053: at a through end it stands with its middle at the stop, so up to half its length past the line's end
-  float cLo = endClear(g_run == 0 ? a_bay.y : a_bay.w, totalM);
-  float centre = clamp(d, cLo, max(cLo, L.z - endClear(g_run == 0 ? a_bay.w : a_bay.y, totalM)));
+  g_len = g_leg ? L.z : M.w;
+  // Shared internal endpoints use the ordinary through-terminal clearance.
+  float startBay = g_leg && g_leg_back ? a_bay.w : g_run == 0 ? a_bay.y : a_bay.w;
+  float endBay = g_leg && g_leg_back ? a_bay.y : g_run == 0 ? a_bay.w : a_bay.y;
+  float cLo = g_leg && !g_leg_first ? 0.0 : endClear(startBay, totalM);
+  float cHi = g_leg && !g_leg_last ? 0.0 : endClear(endBay, totalM);
+  float centre = clamp(d, cLo, max(cLo, L.z - cHi));
   d = centre;
   float offsetM = u_detail ? (float(car) + 0.5) * pitchM - totalM * 0.5 : 0.0;
   float carD = u_detail ? centre + offsetM : d;
   // T-3420, T-3560: a car on a switched-off level is drawn faint
   float lvShown = 1.0;
   if (u_level_hide != 0) {
-    int sl = int(L.x + clamp(floor(clamp(carD, 0.0, L.z) / max(L.w, 1e-6)), 0.0, max(L.y - 1.0, 0.0)));
+    vec4 S = sampleL(L);
+    int sl = int(S.x + clamp(floor(clamp(sampleD(carD), 0.0, S.z) / max(S.w, 1e-6)), 0.0, max(S.y - 1.0, 0.0)));
     lvShown = levelShown(texelFetch(u_slevel, tc(sl, ${TEX_W}), 0).x);
   }
   vec2 p = lineAtX(L, carD);
@@ -1109,6 +1161,7 @@ void main() {
   vec2 nrm = vec2(-sdir.y, sdir.x);
   // T-2182: its two ends each shifted by the band there, so a train easing sideways with its band
   // turns with it rather than sliding crabwise
+  // An internal Run already has geometry ordered in its travel direction.
   float side = (g_run == 0 ? -1.0 : 1.0) * u_keep;
   vec4 lbb = laneAt(L, carD - h), lbf = laneAt(L, carD + h);
   float shB = shiftAt(lbb, side, acrossAt(carD - h, totalM)), shF = shiftAt(lbf, side, acrossAt(carD + h, totalM));
@@ -1161,8 +1214,9 @@ void main() {
   v_alpha = (selectedLine(line) ? 1.0 : u_dim) * lvShown;
   // How full it is (T-084): the stretch it runs, from the sample ahead of it on its way.
   int run = (int(a_trip.x + 0.5) / ${PROFILES_PER_RUN}) % 2;
-  float i = floor(clamp(d, 0.0, L.z) / L.w) + (g_run == 0 ? 1.0 : 0.0);
-  int si = int(L.x + clamp(i, 0.0, L.y - 1.0));
+  vec4 S = sampleL(L);
+  float i = floor(clamp(sampleD(d), 0.0, S.z) / S.w) + (g_leg ? (g_leg_back ? 0.0 : 1.0) : g_run == 0 ? 1.0 : 0.0);
+  int si = int(S.x + clamp(i, 0.0, S.y - 1.0));
   vec2 f = texelFetch(u_fill, tc(si, ${TEX_W}), 0).xy;
   v_fill = run == 0 ? f.x : f.y;
   // Its own load from the boarding account where there is one (T-164); the fill above then only

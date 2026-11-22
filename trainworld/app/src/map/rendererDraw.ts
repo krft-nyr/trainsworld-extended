@@ -849,6 +849,9 @@ export function bindTrainTextures(rnd: NetworkRenderer, u: Record<string, WebGLU
   bind(4, rnd.tex.meta, u.u_meta);
   bind(0, rnd.tex.samples, u.u_samples);
   bind(1, rnd.tex.lines, u.u_lines);
+  bind(14, rnd.tex.legData, u.u_leg_data);
+  bind(15, rnd.tex.legSamples, u.u_leg_samples);
+  gl.uniform1i(u.u_leg_base, (rnd.net?.runLegHeads?.length ?? 0) / 2);
   gl.uniform1i(u.u_back_base, rnd.net ? backBaseOf(rnd.net.lineTable, rnd.net.meta) : 0);
   gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, rnd.tex.colours);

@@ -19,6 +19,9 @@ pub struct Run {
     /// Nodes passed, `segs.len() + 1`, and their offsets.
     pub nodes: Vec<u32>,
     pub node_s: Vec<f64>,
+    /// Ordinary runs separated at intermediate reversal stations.
+    /// Empty for a run without a supported reversal.
+    pub legs: Vec<RunLeg>,
     pub len: f64,
     /// Per stop: index into `nodes` and where the train's middle stands.
     pub stop_idx: Vec<u32>,
@@ -56,6 +59,18 @@ pub struct Run {
     /// Per slot, each weekday departure's `var` by its place in the day (`Dep`'s place), sorted by
     /// place; a place not listed runs `prof`.
     pub pattern: [Vec<(u32, u8)>; SLOTS],
+}
+
+/// One ordinary run within a logical run.
+#[derive(Clone, Debug)]
+pub struct RunLeg {
+    /// Inclusive stop indices in the parent run.
+    pub first_stop: usize,
+    pub last_stop: usize,
+    /// Offset of this leg's origin in the parent run.
+    pub offset: f64,
+    /// Independent run using local distances from zero.
+    pub run: Run,
 }
 
 /// One train-by-train version of a run's timetable (T-3346 stage 2): its own extra dwell per stop
@@ -881,6 +896,185 @@ fn stand_times(run: &Run, dwell: f64, turn: f64) -> Vec<f64> {
     (0..n).map(|i| if i == 0 || i + 1 == n || run.passes(i) { 0.0 } else if run.turn[i] { turn } else { dwell }).collect()
 }
 
+
+/// Stop ranges separated at intermediate reversal stations.
+/// Each reversal stop belongs to both adjacent runs.
+fn run_leg_ranges(run: &Run) -> Vec<(usize, usize)> {
+    let n = run.stop_idx.len();
+    if n < 2 { return Vec::new(); }
+    let mut cuts = vec![0];
+    for j in 1..n - 1 {
+        if run.turn.get(j).copied().unwrap_or(false) && !run.passes(j) {
+            cuts.push(j);
+        }
+    }
+    cuts.push(n - 1);
+    cuts.windows(2).map(|w| (w[0], w[1])).collect()
+}
+
+/// Build one ordinary run from a section of a logical run.
+/// Its path and stop offsets start at zero, and it has no reversal jump.
+fn build_run_leg(net: &Network, parent: &Run, first: usize, last: usize, running: bool, dwell: f64, turn: f64) -> Option<RunLeg> {
+    let a = *parent.stop_idx.get(first)? as usize;
+    let b = *parent.stop_idx.get(last)? as usize;
+    if a >= b || b > parent.segs.len() || parent.limits.is_empty() { return None; }
+
+    let offset = parent.node_s[a];
+    let end = parent.node_s[b];
+    let mut run = Run::default();
+    run.segs = parent.segs[a..b].to_vec();
+    run.seg_off = parent.seg_off[a..b].iter().map(|&s| s - offset).collect();
+    run.nodes = parent.nodes[a..=b].to_vec();
+    run.node_s = parent.node_s[a..=b].iter().map(|&s| s - offset).collect();
+    run.len = end - offset;
+    run.stop_idx = parent.stop_idx[first..=last].iter().map(|&k| k - a as u32).collect();
+    run.turn = vec![false; last - first + 1];
+    run.jump = vec![0.0; last - first + 1];
+
+    if !parent.pass.is_empty() {
+        run.pass = parent.pass[first..=last].to_vec();
+    }
+    run.away = parent.away.iter().filter_map(|&(j, station)| {
+        (j as usize >= first && j as usize <= last).then_some((j - first as u32, station))
+    }).collect();
+
+    // Use the ordinary start/end positioning rules at each new run boundary.
+    for j in first..=last {
+        let k = parent.stop_idx[j] as usize;
+        let node = parent.nodes[k];
+        let mut at = parent.node_s[k] - offset;
+        let boundary_start = j == first && first > 0;
+        let boundary_end = j == last && last + 1 < parent.stop_idx.len();
+
+        if boundary_start || boundary_end {
+            let ports = if running { net.built_ports(node) } else { net.node_ports[node as usize].n as usize };
+            if ports == 1 {
+                let half = net.node_platform[node as usize] as f64 / 2.0;
+                at = if boundary_start {
+                    let next = parent.node_s[parent.stop_idx[j + 1] as usize] - offset;
+                    (at + half).min((at + next) / 2.0)
+                } else {
+                    let prev = parent.node_s[parent.stop_idx[j - 1] as usize] - offset;
+                    (at - half).max((at + prev) / 2.0)
+                };
+            }
+        } else {
+            at = parent.stop_s[j] - offset;
+        }
+        run.stop_s.push(at);
+    }
+
+    // Preserve the already widened speed limits, translated into local offsets.
+    run.limits.push([0.0, profile::limit_at(&parent.limits, offset)]);
+    for &[s, v] in &parent.limits {
+        if s > offset && s < end {
+            run.limits.push([s - offset, v]);
+        }
+    }
+
+    // Reuse the normal Run profile generation.
+    let dw = stand_times(&run, dwell, turn);
+    run.hops = match with_ends(&run, &dw, turn) {
+        None => profile::hops(&run.limits, &run.stop_s, &run.jump),
+        Some((s, jump, ..)) => profile::hops(&run.limits, &s, &jump),
+    };
+    run.free = run_profile(&run, &dw, turn, &[]);
+
+    Some(RunLeg { first_stop: first, last_stop: last, offset, run })
+}
+
+/// Build the internal runs without changing the parent run's timetable.
+/// Non-station reversals still use the existing implementation for now.
+fn build_run_legs(net: &Network, parent: &Run, running: bool, dwell: f64, turn: f64) -> Vec<RunLeg> {
+    if !parent.ends.is_empty() { return Vec::new(); }
+    let ranges = run_leg_ranges(parent);
+    if ranges.len() < 2 { return Vec::new(); }
+
+    ranges.into_iter().map(|(first, last)| {
+        build_run_leg(net, parent, first, last, running, dwell, turn)
+    }).collect::<Option<Vec<_>>>().unwrap_or_default()
+}
+
+/// Convert capacity holds from the logical Run's offsets to a leg's local offsets.
+fn holds_for_leg(holds: &[Hold], leg: &RunLeg, first: bool) -> Vec<Hold> {
+    let start = leg.offset;
+    let end = start + leg.run.len;
+    holds.iter().filter_map(|h| {
+        if h.span <= 0.0 {
+            // A hold exactly at a shared boundary belongs to the arriving leg.
+            if h.s >= start && h.s <= end && (first || h.s > start) {
+                return Some(Hold { s: h.s - start, ..*h });
+            }
+            return None;
+        }
+        let lo = h.s.max(start);
+        let hi = (h.s + h.span).min(end);
+        if hi <= lo { return None; }
+        Some(Hold { s: lo - start, span: hi - lo, delay: h.delay * (hi - lo) / h.span })
+    }).collect()
+}
+
+/// Join ordinary RunLeg profiles into one logical Run profile.
+/// The reversal stop appears once: arrival from the preceding leg,
+/// departure into the following leg after the turnaround.
+fn joined_run_profile(net: &Network, line: u32, parent: &Run, stop_holds: &[f64], holds: &[Hold]) -> Profile {
+    let mut out = Profile::default();
+    out.arr.resize(parent.stop_idx.len(), 0.0);
+    out.dep.resize(parent.stop_idx.len(), 0.0);
+    let turnaround = net.line_turn[line as usize] as f64;
+    let mut t = 0.0;
+
+    for (i, leg) in parent.legs.iter().enumerate() {
+        let mut extra: Vec<f64> = (leg.first_stop..=leg.last_stop).map(|j| stop_holds.get(j).copied().unwrap_or(0.0)).collect();
+
+        // The shared stop's extra dwell is charged at the connection, only once.
+        if i > 0 { extra[0] = 0.0; }
+        if i + 1 < parent.legs.len() { *extra.last_mut().unwrap() = 0.0; }
+
+        let local_holds = holds_for_leg(holds, leg, i == 0);
+        let p = if local_holds.is_empty() && extra.iter().all(|&x| x == 0.0) {
+            leg.run.free.clone()
+        } else {
+            profile_with(net, line, &leg.run, &extra, &local_holds)
+        };
+
+        for j in 0..p.arr.len() {
+            if i > 0 && j == 0 { continue; }
+            let k = leg.first_stop + j;
+            out.arr[k] = t + p.arr[j];
+            out.dep[k] = t + p.dep[j];
+        }
+
+        // Keep one monotone distance axis for the logical Run.
+        out.phases.extend(p.phases.iter().map(|ph| profile::Phase {
+            t: t + ph.t,
+            s: leg.offset + ph.s,
+            v: ph.v,
+            a: ph.a,
+        }));
+        out.dwell += p.dwell;
+        out.hold += p.hold;
+        t += p.duration;
+
+        if i + 1 < parent.legs.len() {
+            let j = leg.last_stop;
+            let extra_stand = stop_holds.get(j).copied().unwrap_or(0.0);
+            let stand = turnaround + extra_stand;
+            let s = leg.offset + leg.run.stop_s.last().copied().unwrap_or(leg.run.len);
+
+            // Finish the arriving Run, stand, then start the departing Run.
+            out.phases.push(profile::Phase { t, s, v: 0.0, a: 0.0 });
+            out.dep[j] = t + stand;
+            out.dwell += stand;
+            out.hold += extra_stand;
+            t += stand;
+        }
+    }
+
+    out.duration = t;
+    out
+}
+
 fn build_line(net: &Network, l: u32) -> LineSvc {
     if !net.line_ok(l) || net.line_broken[l as usize] {
         return LineSvc::default();
@@ -923,8 +1117,19 @@ fn build_on(net: &Network, l: u32, stops: &[u32], path: &[u32], running: bool) -
     let first = build_run(net, l, &on, false, ls.train_len, dwell);
     // a loop that runs one way has no return run to build, whatever one-way track it goes round (T-3094)
     let second = build_run(net, l, &on, true, ls.train_len, dwell).or_else(|| if ls.one_way { first.clone() } else { None });
+
     match (first, second) {
-        (Some(a), Some(b)) => {
+        (Some(mut a), Some(mut b)) => {
+            let turn = net.line_turn[l as usize] as f64;
+            let a_legs = build_run_legs(net, &a, running, dwell, turn);
+            let b_legs = build_run_legs(net, &b, running, dwell, turn);
+            a.legs = a_legs;
+            b.legs = b_legs;
+
+            // Replace the legacy jump-based free profile with joined ordinary Runs.
+            if !a.legs.is_empty() { a.free = joined_run_profile(net, l, &a, &[], &[]); }
+            if !b.legs.is_empty() { b.free = joined_run_profile(net, l, &b, &[], &[]); }
+
             ls.runs = [a, b];
             ls.ok = true;
             ls.running = running;
@@ -1045,7 +1250,11 @@ fn profile_for(net: &Network, l: u32, run: &Run, level: usize) -> Profile {
 /// A rail run's profile with these extra dwells per stop and track holds (T-3346 stage 2: a
 /// variant's, or the slot's).
 pub(crate) fn profile_with(net: &Network, l: u32, run: &Run, stop_holds: &[f64], holds: &[Hold]) -> Profile {
+    if !run.legs.is_empty() {
+        return joined_run_profile(net, l, run, stop_holds, holds);
+    }
     let turn = net.line_turn[l as usize] as f64;
+
     let mut dw = stand_times(run, net.line_dwell[l as usize] as f64, turn);
     for (d, h) in dw.iter_mut().zip(stop_holds) {
         *d += h;

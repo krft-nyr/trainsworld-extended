@@ -63,7 +63,7 @@ export function createMap(container: HTMLElement): maplibregl.Map {
   effect(() => { map.setMaxZoom(touchInput.value ? TOUCH_MAX_ZOOM : 22); });
   warnOnNetworkFailure(map);
   watchGraphics(map.getCanvas()); // T-2794
-  wheelGapsByEventTime(map);
+  //wheelGapsByEventTime(map);
   loadBasemap(map);
   map.on("load", () => {
     document.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");

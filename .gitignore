@@ -14,3 +14,4 @@ trainworld/data/
 # output of the browser checks, and the Python venv the pipeline expects at the repo root
 artifacts/
 venv/
+.vscode/settings.json

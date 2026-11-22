@@ -230,6 +230,47 @@ function buildState(): ClockState {
   // network.ts `backSlot`)
   const meta = a.profile_meta();
   const nLines = meta.length / META_PER_LINE;
+
+  // Render geometry for ordinary Runs wrapped by a logical Run.
+  // Keep these separate from the existing line samples.
+  const runLegHeads = new Float32Array(Math.max(1, nLines * 2) * 2);
+  const legRows: number[] = [];
+  const legXY: number[] = [];
+  let legSamples = 0;
+
+  for (const l of lines) {
+    if (!l.ok || l.id >= nLines) continue;
+
+    for (let run = 0; run < 2; run++) {
+      const info = a.run_leg_info(l.id, run);
+      if (info.length % 4 !== 0) throw new Error(`Invalid RunLeg info: line=${l.id}, run=${run}`);
+
+      const key = (l.id * 2 + run) * 2;
+      runLegHeads[key] = legRows.length / 6;
+      runLegHeads[key + 1] = info.length / 4;
+
+      for (let j = 0; j < info.length; j += 4) {
+        const part = j / 4;
+        const points = a.run_leg_polyline(l.id, run, part, SAMPLE_STEP);
+        if (points.length < 4 || points.length % 2 !== 0) {
+          throw new Error(`Invalid RunLeg geometry: line=${l.id}, run=${run}, leg=${part}`);
+        }
+
+        const merc = new Float64Array(points.length);
+        for (let k = 0; k < points.length; k += 2) {
+          merc.set(toMerc01(...packLngLat(points[k], points[k + 1])), k);
+        }
+
+        const local = localOf(merc, 2);
+        legRows.push(legSamples, local.length / 2, info[j + 3], SAMPLE_STEP, info[j], info[j + 1]);
+        for (const v of local) legXY.push(v);
+        legSamples += local.length / 2;
+      }
+    }
+  }
+
+  const runLegTable = new Float32Array(legRows.length ? legRows : [0, 0, 0, SAMPLE_STEP, 0, 0]);
+  const runLegSamples = new Float32Array(legXY.length ? legXY : [0, 0]);
   const backs = lines.filter((l) => l.ok && l.back?.length && l.id < nLines);
   const lineTable = new Float32Array(Math.max(1, nLines) * (backs.length ? 8 : 4));
   const runs: Float32Array[] = [];
@@ -310,6 +351,9 @@ function buildState(): ClockState {
       meta,
       samples,
       lineTable,
+      runLegHeads,
+      runLegTable,
+      runLegSamples,
     },
     money: moneyState(),
     anchor: anchorSpec(),
@@ -428,7 +472,7 @@ export function* stateSteps(service = false, effectiveAt?: number, trips = true,
   const r = s.render;
   // the per-edge arrays stay here (T-1029): the network carries what the main thread needs of them.
   // `r.phases` is the rows' own array (T-1540), never transferred: a copy goes where it is wanted.
-  s.render = { phases: NO_PHASES, meta: r.meta, samples: r.samples, lineTable: r.lineTable };
+  s.render = { phases: NO_PHASES, meta: r.meta, samples: r.samples, lineTable: r.lineTable, runLegHeads: r.runLegHeads, runLegTable: r.runLegTable, runLegSamples: r.runLegSamples };
   if (service && running === runningLines && posted.net) {
     s.service = true;
     s.ms = [t1 - t0, 0];
@@ -436,7 +480,15 @@ export function* stateSteps(service = false, effectiveAt?: number, trips = true,
     s.render.phases = r.phases.slice();
     posted.arrays.set("phases", r.phases);
     keepPosted("meta", r.meta);
-    postState(s, [s.render.phases.buffer, r.meta.buffer, r.samples.buffer, r.lineTable.buffer]);
+    postState(s, [
+      s.render.phases.buffer,
+      r.meta.buffer,
+      r.samples.buffer,
+      r.lineTable.buffer,
+      ...(r.runLegHeads ? [r.runLegHeads.buffer] : []),
+      ...(r.runLegTable ? [r.runLegTable.buffer] : []),
+      ...(r.runLegSamples ? [r.runLegSamples.buffer] : []),
+    ]);
     timing.post = performance.now() - t1;
     if (trips) sendTrips(split);
     return;

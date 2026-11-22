@@ -807,6 +807,12 @@ export interface ClockRender {
   meta: Float32Array;
   samples: Float32Array;
   lineTable: Float32Array;
+  /** Per (line * 2 + run): first internal run, number of internal runs. */
+  runLegHeads?: Float32Array;
+  /** Per internal run: first sample, sample count, length, step, first stop, last stop. */
+  runLegTable?: Float32Array;
+  /** Sampled x/y coordinates of the internal runs. */
+  runLegSamples?: Float32Array;
 }
 
 /** A busy resource (SPEC 6.2: 75% and up), local units. `kind`: 0 track, 1 single track,

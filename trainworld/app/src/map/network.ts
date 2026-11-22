@@ -152,6 +152,12 @@ export interface NetworkBuffers {
   meta: Float32Array;
   samples: Float32Array;
   lineTable: Float32Array;
+  /** Per directional run: first internal run and count. */
+  runLegHeads?: Float32Array;
+  /** Per internal run: sample range, length, step and stop range. */
+  runLegTable?: Float32Array;
+  /** Internal run geometry in local coordinates. */
+  runLegSamples?: Float32Array;
   /** Actual 20 m cars per train, indexed by line id; absent in old synthetic fixtures. */
   lineCars?: Float32Array;
   /** per sample of `samples`: a line stroke segment of the same stretch of path, -1 if none
@@ -2072,6 +2078,9 @@ export function* networkSteps(s: ClockState, cache: NetCache = newNetCache(), de
     meta: r.meta,
     samples: r.samples,
     lineTable: r.lineTable,
+    runLegHeads: r.runLegHeads,
+    runLegTable: r.runLegTable,
+    runLegSamples: r.runLegSamples,
     lineCars,
     stationShape,
     stationLine,
