@@ -358,7 +358,7 @@ function ReferenceTimes({ st, day, active, referenceName, onReference, times, on
   );
 }
 
-type ReferenceMethod = "time" | "departure" | "arrival";
+type ReferenceMethod = "time" | "departure" | "arrival" | "pass";
 
 /** The detailed schedule settings window, with a full-height timetable and no chart. */
 function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
@@ -411,7 +411,14 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const referenceKey = selectedStop === null ? null : `${direction}:${selectedStop}`;
   const referenceMethod = referenceKey === null || !connectionPossible ? "time" : referenceMethods[referenceKey] ?? "time";
   const referenceStation = selectedStop === null ? null : l.stops[selectedStop];
-  const referenceLines = referenceStation ? linesAt(referenceStation).filter((other) => other.id !== l.id) : [];
+  const referenceLines = referenceMethod === "pass"
+    ? passingStation ? listedLines(w).filter((other) => {
+      if (other.id === l.id) return false;
+      const otherStats = w.lineStats[other.id];
+      return !!otherStats && [otherStats, otherStats.twin ? w.lineStats[otherStats.twin] : undefined]
+        .some((stats) => stats?.passed.some((p) => p.node === passingStation.num));
+    }) : []
+    : referenceStation ? linesAt(referenceStation).filter((other) => other.id !== l.id) : [];
   const referenceLineKey = referenceKey === null ? null : `${referenceKey}:${referenceMethod}`;
   const specifyReferenceLine = referenceLineKey !== null && specifiedReferenceLines.has(referenceLineKey);
   const referenceLineId = referenceLineKey === null || !specifyReferenceLine ? null : referenceLineIds[referenceLineKey] ?? null;
@@ -512,7 +519,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
               設定項目
               <span class="right">
                 <Segmented<"departure" | "dwell">
-                  options={[["departure", "発車時刻"], ["dwell", "停車時間"]]}
+                  options={[["departure", "発車条件"], ["dwell", "停車時間"]]}
                   value={settingKind}
                   onChange={setSettingKind}
                 />
@@ -520,14 +527,15 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
             </div>
             {settingKind === "departure" && (
               <>
-                <div class="h set-by sp-settings-switch">
-                  発車方法
+                <div class="h set-by">
+                    発車方法
                   <span class="right">
                     <Segmented<ReferenceMethod>
                       options={[
-                        ["time", "基準時刻"],
-                        ["departure", "他路線出発待"],
-                        ["arrival", "他路線到着待"],
+                        ["time", "発車基準時刻"],
+                        ["departure", "出発待"],
+                        ["arrival", "到着待"],
+                        ["pass", "通過待"],
                       ]}
                       value={referenceMethod}
                       onChange={setReferenceMethod}
@@ -570,7 +578,9 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                 ) : (                  
                   <div class="sp-reference-lines">
                     <Check checked={specifyReferenceLine} onChange={setSpecifyReferenceLine}>
-                      {referenceMethod === "arrival" ? "路線を指定して到着待" : "路線を指定して発車待"}
+                      {referenceMethod === "arrival" ? "路線を指定して到着待ち"
+                        : referenceMethod === "pass" ? "路線を指定して通過待ち"
+                        : "路線を指定して発車待ち"}
                     </Check>
 
                     {specifyReferenceLine && (
@@ -592,7 +602,11 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                           ))}
                         </ul>
                       ) : (
-                        <p class="muted">この駅に停車する他の路線はありません。</p>
+                        <p class="muted">
+                          {referenceMethod === "pass"
+                            ? "この駅を通過する他の路線はありません。"
+                            : "この駅に停車する他の路線はありません。"}
+                        </p>
                       )
                     )}
 
@@ -601,7 +615,11 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                     )}
 
                     <div class="sp-reference-offsets">
-                      <span class="muted">{referenceMethod === "arrival" ? "他路線の到着から" : "他路線の発車から"}</span>
+                      <span class="muted">
+                        {referenceMethod === "arrival" ? "他路線の到着から"
+                          : referenceMethod === "pass" ? "他路線の通過から"
+                          : "他路線の発車から"}
+                      </span>
                       <table class="sched sp-reference-table">
                         <thead>
                           <tr>
@@ -616,7 +634,17 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                               <tr key={row.code}>
                                 <td>
                                   <span class="sp-reference-period">
-                                    <span>{rowLabel(rowCount(st), i)}</span>
+                                    {referenceMethod === "pass" ? (
+                                      <label class="check">
+                                        <input type="checkbox" checked={passingAssigned(row.periods)}
+                                          class={passingPartial(row.periods) ? "some" : undefined}
+                                          aria-checked={passingPartial(row.periods) ? "mixed" : passingAssigned(row.periods)}
+                                          onChange={(e) => setPassingStation(row.periods, e.currentTarget.checked)} />
+                                        <span>{rowLabel(rowCount(st), i)}</span>
+                                      </label>
+                                    ) : (
+                                      <span>{rowLabel(rowCount(st), i)}</span>
+                                    )}
                                     <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
                                   </span>
                                 </td>
@@ -671,23 +699,6 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                   </tbody>
                 </table>
               </div>
-            )}
-            {passingPossible && (
-              <details class="sched-default sp-passing-setting">
-                <summary class="sched-default-head">待避設定</summary>
-                <div class="sp-passing-rows">
-                  {rowsOf(rowCount(st)).map((row, i) => (
-                    <label key={row.code} class="check">
-                      <input type="checkbox" checked={passingAssigned(row.periods)}
-                        class={passingPartial(row.periods) ? "some" : undefined}
-                        aria-checked={passingPartial(row.periods) ? "mixed" : passingAssigned(row.periods)}
-                        onChange={(e) => setPassingStation(row.periods, e.currentTarget.checked)} />
-                      <span>{rowLabel(rowCount(st), i)}</span>
-                      <small class="muted">{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
-                    </label>
-                  ))}
-                </div>
-              </details>
             )}
         </div>
       )}
