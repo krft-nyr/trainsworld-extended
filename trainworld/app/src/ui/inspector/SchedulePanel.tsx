@@ -438,7 +438,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
     if (referenceOffsetKey === null) return 0;
     const values = periods.map((period) => referenceOffsets[`${referenceOffsetKey}:${period}`] ?? 0);
     return values.every((value) => value === values[0]) ? values[0] : null;
-  };0;
+  };
 
   const setReferenceMethod = (method: ReferenceMethod) => {
     if (referenceKey === null || (method !== "time" && !connectionPossible)) return;
