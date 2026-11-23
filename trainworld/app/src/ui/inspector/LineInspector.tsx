@@ -40,7 +40,7 @@ import { useClockQuery } from "../useClockQuery";
 import type { Vehicle } from "../../game/vehicle";
 import { drawnReversed } from "../../game/northUp";
 import { partwayReversals, turnedLine, type TurnRow } from "../../game/turnedLine";
-import { ScheduleButton } from "./SchedulePanel";
+import { ScheduleButton, ScheduleSettingsButton } from "./SchedulePanel";
 import { LineProfile } from "./LineProfile";
 import { LineTopSpeed } from "./LineTopSpeed";
 import { LineFare, LineMoney } from "./LineMoney";
@@ -641,11 +641,12 @@ function stretchTip(s: { reached: number; limit: number; why: number } | undefin
   return tr("lineInspector.reach", { speed: speed(s.reached), vehicle }) + "\n" + why + (s.reached < s.limit - 1 ? "\n" + tr("lineInspector.tooClose") : "");
 }
 
-/** The schedule panel button beside the Schedule heading (T-3543: a default for new lines is set in the schedule panel). */
+/** The schedule panel buttons beside the Schedule heading. */
 export function ScheduleButtons({ l, st }: { l: LineInput; st: LineStats }) {
   return (
     <span class="sched-copy">
       <ScheduleButton l={l} st={st} />
+      <ScheduleSettingsButton l={l} st={st} />
     </span>
   );
 }

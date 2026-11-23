@@ -237,6 +237,94 @@ svg .stroke2 { stroke-width: 2; }
 /* T-3703: a bus or ferry line's, the schedule alone */
 .saves-panel.sched-panel.narrow { width: min(360px, calc(100vw - 40px)); }
 .sched-panel.narrow .sp-left { flex: 1 1 auto; }
+/* Detailed timetable settings: a full-height, chart-free timetable. */
+.saves-panel.sched-panel.settings { height: calc(100dvh - 40px); max-height: calc(100dvh - 40px); }
+.sched-panel.settings .saves-inner { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.sched-panel.settings .sp-body { flex: 1; min-height: 0; align-items: stretch; }
+.sched-panel.settings .sp-right { display: flex; flex-direction: column; min-height: 0; }
+.sched-panel.settings .tt-ordered { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.sched-panel.settings .tt-ordered .tt-scroll { flex: 1; min-height: 0; max-height: none; margin-right: 0; }
+.sched-panel.settings .tt-ordered .tt-inner { min-width: 100%; }
+.sched-panel.settings .tt-ordered .tt-hour { font-size: 9px; }
+.sched-panel.settings .tt-ordered .tt-col.rel span { opacity: 1; }
+.sched-panel.settings .tt-ordered .tt-col.past { opacity: 1; }
+.sched-panel.settings .tt-ordered .tt-bullet.rel { opacity: 1; }
+.sched-panel.settings .tt-ordered .tt-col:hover { background: var(--shade); }
+/* Station selection in the detailed timetable settings. */
+.sched-panel.settings .tt-ordered .tt-station { display: block; width: 100%; height: var(--row); padding: 0 8px 0 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; line-height: var(--row); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.sched-panel.settings .tt-ordered .tt-station:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.sched-panel.settings .tt-ordered .tt-station.selected { background: color-mix(in srgb, var(--accent) 24%, var(--bg)); }
+.sched-panel.settings .tt-ordered .tt-station.selected:hover { background: color-mix(in srgb, var(--accent) 28%, var(--bg)); }
+.sched-panel.settings .tt-ordered .tt-station:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The selected station's departures sit at the bottom of the settings pane. */
+.sched-panel.settings .sp-settings-detail { display: flex; flex-direction: column; min-height: 0; }
+.sched-panel.settings .sp-settings-detail[hidden] { display: none; }
+.sched-panel.settings .sp-settings-board { display: flex; flex-direction: column; min-height: 0; margin-top: auto; }
+.sched-panel.settings .sp-settings-board .sp-tools { margin-top: 0; }
+.sched-panel.settings .sp-settings-board .sp-board { flex: 0 1 auto; min-height: 0; max-height: min(340px, 45vh); }
+.sched-panel.settings .sp-station-settings { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.sched-panel.settings .sp-station-settings .h { margin: 6px 0 0; }
+/* Pattern timetable reference-time editing, in the selected station's settings pane. */
+.sched-panel.settings .sp-reference { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sched-panel.settings .sp-reference-station { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; font-size: 12px; }
+.sched-panel.settings .sp-reference-station .btn { flex: none; padding: 0 6px; white-space: nowrap; }
+.sched-panel.settings .sp-reference-days .group { display: flex; width: 100%; }
+.sched-panel.settings .sp-reference-days .btn { flex: 1; }
+.sched-panel.settings .sp-reference-table { width: 100%; }
+.sched-panel.settings .sp-reference-table td { padding: 4px 0; }
+.sched-panel.settings .sp-reference-table td:first-child { width: auto; max-width: none; }
+.sched-panel.settings .sp-reference-period { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.sched-panel.settings .sp-reference-period small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.sched-panel.settings .sp-reference-table input[type="time"] { width: 108px; height: 27px; padding: 2px 6px; box-sizing: border-box; border: 1px solid var(--rule); border-radius: 2px; background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
+.sched-panel.settings .sp-reference-table input[type="time"]:disabled { opacity: 0.45; }
+.sched-panel.settings .sp-reference-table input[type="time"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The settings kind uses the detailed schedule's Set by layout. */
+.sched-panel.settings .sp-settings-switch { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 400; color: var(--muted); }
+.sched-panel.settings .sp-settings-switch .right { margin-left: auto; }
+.sched-panel.settings .sp-settings-switch .group { display: flex; width: auto; }
+.sched-panel.settings .sp-settings-switch .group .btn { flex: none; min-width: 0; padding: 4px 8px; white-space: nowrap; }
+.sched-panel.settings .sp-reference-time-field { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.sched-panel.settings .sp-reference-time-field input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
+.sched-panel.settings .sp-reference-invalid { color: var(--bad); font-size: 10px; text-align: right; }
+/* The selected station heading reuses the station inspector's station glyph. */
+.sched-panel.settings .sp-selected-station-heading { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; }
+.sched-panel.settings .sp-selected-station-title { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.sched-panel.settings .sp-selected-station-title .st-glyph { width: 18px; height: 18px; }
+.sched-panel.settings .sp-selected-station-title .st-glyph::after { width: 9px; height: 9px; border-width: 2px; }
+.sched-panel.settings .sp-selected-station-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sched-panel.settings .sp-selected-station-heading .right { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* The ordinary schedule window shows only the timetable and diagram. */
+.sched-panel .sp-view-only { display: block; }
+.sched-panel .sp-view-only .sp-right { width: 100%; }
+/* Keep line-wide headway controls above optional station settings. */
+.sched-panel.settings .sp-settings-detail { display: flex; flex: 0 0 330px; flex-direction: column; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.sched-panel.settings .sp-settings-detail[hidden] { display: none; }
+.sched-panel.settings .sp-line-headway { flex: none; min-width: 0; }
+.sched-panel.settings .sp-line-headway .h.set-by { margin-top: 6px; }
+.sched-panel.settings .sp-settings-toggles { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 14px; }
+.sched-panel.settings .sp-station-settings { flex: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.sched-panel.settings .sp-settings-board { flex: none; margin-top: 14px; }
+.sched-panel.settings .sp-station-settings { flex: none; margin-top: 12px; padding-top: 0; border-top: 0; }
+.sched-panel.settings .sp-line-headway { flex: none; min-width: 0; margin-top: 12px; }
+.sched-panel.settings .sp-station-settings + .sp-line-headway { padding-top: 12px; border-top: 1px solid var(--rule); }
+/* Weekday/weekend switch above the line-wide headway settings. */
+.sched-panel.settings .sp-line-headway { flex: none; min-width: 0; margin-top: 0; padding: 0; border: 0; }
+.sched-panel.settings .sp-line-headway-days { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.sched-panel.settings .sp-line-headway-days .h { margin: 0; }
+.sched-panel.settings .sp-line-headway-days .group { flex: none; }
+.sched-panel.settings .sp-station-settings { flex: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.sched-panel.settings .sp-reference-method { margin-top: 10px; margin-bottom: 10px; }
+.sched-panel.settings .sp-reference-method .group .btn { padding: 4px 5px; font-size: 11px; white-space: nowrap; }
+.sched-panel.settings .sp-reference-lines { margin-top: 8px; }
+.sched-panel.settings .sp-reference-lines .rows > li { min-height: 30px; }
+.sched-panel.settings .sp-reference-lines .rows > li + li { margin-top: 5px; }
+.sched-panel.settings .sp-reference-offset { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 14px; font-size: 12px; }
+.sched-panel.settings .sp-reference-offset .stepper { flex: none; }
+.sched-panel.settings .sp-reference-offset + .sp-passing-setting { margin-top: 14px; }
+.sched-panel.settings .sp-reference-method { display: block; margin-top: 10px; margin-bottom: 10px; }
+.sched-panel.settings .sp-reference-method .right { display: block; margin: 6px 0 0; }
+.sched-panel.settings .sp-reference-method .group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.sched-panel.settings .sp-reference-method .group .btn { min-width: 0; padding: 5px 3px; font-size: 11px; line-height: 1.3; white-space: normal; }
 .saves-head.sp-title h2 { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
 .sp-title .sp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-title .sp-word { color: var(--muted); font-weight: 400; font-size: 14px; }

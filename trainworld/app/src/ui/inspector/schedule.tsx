@@ -328,8 +328,8 @@ function LevelName({ v, n, r, stops, flip, pending, ends, vehicle, hours }: { v:
  * schedule window, T-3542); `weekends`: a Weekdays and a Weekends
  * section (the schedule panel's, T-3521; T-3542: the row now by the line's own hours, `period` unread); `above`: rows the schedule panel puts under the heading
  * (T-3542: the periods). */
-export function Schedule({ l, st, limits = NO_LIMITS, crowd = null, canAuto = true, copy, label, weekends = false, hours = false, above }: {
-  l: LineInput; st: LineStats; period: number; limits?: (Limit | null)[]; crowd?: Float64Array | null; canAuto?: boolean; copy?: ComponentChildren; label?: string; weekends?: boolean; hours?: boolean; above?: ComponentChildren;
+export function Schedule({ l, st, limits = NO_LIMITS, crowd = null, canAuto = true, copy, label, weekends = false, hours = false, above, dayView }: {
+  l: LineInput; st: LineStats; period: number; limits?: (Limit | null)[]; crowd?: Float64Array | null; canAuto?: boolean; copy?: ComponentChildren; label?: string; weekends?: boolean; hours?: boolean; above?: ComponentChildren; dayView?: 0 | 1;
 }) {
   const v = vehicleOf(st);
   const auto = rowHeadwayShown(l.id);
@@ -374,7 +374,7 @@ export function Schedule({ l, st, limits = NO_LIMITS, crowd = null, canAuto = tr
             </tr>
           );
         })}
-        {weekends && <DaySections l={l} st={st} now={now} limits={limits} crowd={crowd} auto={auto} flip={flip} hours={hours} />}
+        {weekends && <DaySections l={l} st={st} now={now} limits={limits} crowd={crowd} auto={auto} flip={flip} hours={hours} dayView={dayView} />}
       </table>
       {weekends && <DefaultHeadways id={l.id} n={f.n} auto={rowHeadwayShown(l.id)} />}
     </>
@@ -402,10 +402,14 @@ function DefaultHeadways({ id, n, auto }: { id: string; n: number; auto: readonl
 }
 const KIND_TITLE = { rail: "schedule.defaultTitle", tram: "schedule.defaultTitleTram", fast: "schedule.defaultTitleFast", bus: "schedule.defaultTitleBus", ferry: "schedule.defaultTitleFerry" } as const;
 
+
 /** T-3521: the schedule panel's table body: a Weekdays section and a Weekends section, each a row a
  * row of the line's (T-3542). Today's kind of day bolds its row now (`now`), as the line panel does, and has `crowd`'s dots;
- * the other section's dots are a weekday's or a Saturday's (the boarding account's kinds 0 and 1). */
-function DaySections({ l, st, now, limits, crowd, auto, flip, hours }: { l: LineInput; st: LineStats; now: number; limits: (Limit | null)[]; crowd: Float64Array | null; auto: readonly number[] | null; flip: boolean; hours: boolean }) {
+ * the other section's dots are a weekday's or a Saturday's (the boarding account's kinds 0 and 1).
+ * `dayView` shows only one kind of day in the detailed timetable editor. */
+function DaySections({ l, st, now, limits, crowd, auto, flip, hours, dayView }: {
+  l: LineInput; st: LineStats; now: number; limits: (Limit | null)[]; crowd: Float64Array | null; auto: readonly number[] | null; flip: boolean; hours: boolean; dayView?: 0 | 1;
+}) {
   const cols = hours ? 4 : 3;
   const w = world.value, stops = l.stops.length;
   const today = rowIn(lineCountry(l.stops), Math.floor(lineSeconds(st) / 86400));
@@ -414,6 +418,7 @@ function DaySections({ l, st, now, limits, crowd, auto, flip, hours }: { l: Line
   const asked = useClockQuery(st.status === "running" ? { what: "linePeriods", line: l.num, day: other } : null, [l.num, w?.version, acct, other], (x) => (x.length ? x : null)) ?? null;
   const crowdOf = (row: number) => (row === today ? crowd : asked);
   const f = rowsFigs(st);
+  const days = dayView === undefined ? [0, 1] : [dayView];
   // T-3542: the row whose typed hours left some row too short, and the hours it needs
   const [short, setShort] = useState<{ r: number; need: number } | null>(null);
   useEffect(() => {
@@ -423,9 +428,11 @@ function DaySections({ l, st, now, limits, crowd, auto, flip, hours }: { l: Line
   }, [short]);
   return (
     <>
-      {[0, 1].map((row) => (
+      {days.map((row) => (
         <>
-          {row === 0 ? <tr class="sched-day"><th colSpan={cols}>{t("schedule.weekdays")}</th></tr> : <WeekendHead l={l} cols={cols} />}
+          {row === 0
+            ? dayView === undefined && <tr class="sched-day"><th colSpan={cols}>{t("schedule.weekdays")}</th></tr>
+            : <WeekendHead l={l} cols={cols} />}
           {f.rows.map((_, lev) => {
             const shown = row === 0 ? rowTrainsShown(l.id) ?? f.settled : rowWeekendShown(l.id)?.counts ?? f.settled;
             // T-1783: no dot on a row with no vehicles that day
@@ -434,12 +441,12 @@ function DaySections({ l, st, now, limits, crowd, auto, flip, hours }: { l: Line
             const p = dot && c && lineFiguresIn(demandView.value, l.id, stops) ? c : null;
             return (
               <>
-              <tr class={lev === now && today === row ? "now" : ""}>
-                <td><LevelName v={p} n={f.n} r={lev} stops={stops} flip={flip} ends={endNames(l)} vehicle={vehicleOf(st)} pending={dot && !p && demandPending.value} hours={hoursOf(st)} /></td>
-                {hours && <td>{row === 0 && <HoursBox l={l} st={st} n={f.n} r={lev} onShort={(need) => setShort(need ? { r: lev, need } : null)} />}</td>}
-                {row === 0 ? <LevelCells l={l} st={st} lev={lev} auto={auto} limits={limits} /> : <WeekendCells l={l} st={st} lev={lev} auto={auto !== null} limits={limits} />}
-              </tr>
-              {row === 0 && short?.r === lev && <tr class="sched-short"><td colSpan={cols} class="bad">{t(short.need > 2 ? "schedule.hoursShortHigh" : "schedule.hoursShort", { count: short.need })}</td></tr>}
+                <tr class={lev === now && today === row ? "now" : ""}>
+                  <td><LevelName v={p} n={f.n} r={lev} stops={stops} flip={flip} ends={endNames(l)} vehicle={vehicleOf(st)} pending={dot && !p && demandPending.value} hours={hoursOf(st)} /></td>
+                  {hours && <td>{(row === 0 || dayView === 1) && <HoursBox l={l} st={st} n={f.n} r={lev} onShort={(need) => setShort(need ? { r: lev, need } : null)} />}</td>}
+                  {row === 0 ? <LevelCells l={l} st={st} lev={lev} auto={auto} limits={limits} /> : <WeekendCells l={l} st={st} lev={lev} auto={auto !== null} limits={limits} />}
+                </tr>
+                {(row === 0 || dayView === 1) && short?.r === lev && <tr class="sched-short"><td colSpan={cols} class="bad">{t(short.need > 2 ? "schedule.hoursShortHigh" : "schedule.hoursShort", { count: short.need })}</td></tr>}
               </>
             );
           })}
@@ -448,6 +455,7 @@ function DaySections({ l, st, now, limits, crowd, auto, flip, hours }: { l: Line
     </>
   );
 }
+
 
 /** How long the hours a row's box was refused for show under it, ms. */
 const SHORT_SHOWN_MS = 5000;

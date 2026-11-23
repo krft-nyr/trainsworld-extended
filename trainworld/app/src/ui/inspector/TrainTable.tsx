@@ -30,7 +30,7 @@ import type { Shared } from "./mareyShare";
 
 const DAY = 86400, HOUR = 3600;
 /** a column's width, a row's height and the head's height, px */
-const COL = 27, ROW = 13, MARK_H = 14;
+const COL = 30, ROW = 13, MARK_H = 14;
 /** a strip head's letters at most, and the height of each, px */
 const STRIP_MAX = 4, STRIP_CH = 11;
 /** the share of the day's columns the opening zoom draws, at least */
@@ -358,8 +358,8 @@ function Cells({ c, shift }: { c: Col; shift: number }) {
 }
 
 /** A train's column of times, its centre `x` px from the table's left; `cells` its `Cells`. */
-function Column({ c, x, cls, cells, dark }: { c: Col; x: number; cls: string; cells: ComponentChildren; dark: boolean }) {
-  return <div class={"tt-col" + cls} data-k={c.key} style={{ left: x - COL / 2 + "px", width: COL + "px", "--ink": legibleOn(c.bullet.colour, dark) }}>{cells}</div>;
+function Column({ c, x, cls, cells, dark, width = COL }: { c: Col; x: number; cls: string; cells: ComponentChildren; dark: boolean; width?: number }) {
+  return <div class={"tt-col" + cls} data-k={c.key} style={{ left: x - width / 2 + "px", width: width + "px", "--ink": legibleOn(c.bullet.colour, dark) }}>{cells}</div>;
 }
 
 /** The hovered train, over a veil that fades the rest: its bullet (`part` "head"), or its times with
@@ -407,9 +407,18 @@ const zoomOf = (el: HTMLElement) => (el as HTMLElement & { currentCSSZoom?: numb
 /** The timetable of `axis` (its stops as rows) with `others`' trains where they run on its
  * stations, `related`'s behind them while other lines are shown (T-3818), and the chart of `axis`
  * under it. `tools` sit at the end of its direction choice. */
-export function TrainTable({ axis, st, others = [], related = [], links, group, plotH, tools }: {
-  axis: LineInput; st: LineStats; others?: readonly LineInput[]; related?: readonly Related[]; links: Links | null; group?: ReadonlySet<number>; plotH: number; tools?: ComponentChildren;
-}) {
+interface TrainTableProps {
+  axis: LineInput; st: LineStats; others?: readonly LineInput[]; related?: readonly Related[]; links: Links | null;
+  group?: ReadonlySet<number>; plotH: number; tools?: ComponentChildren; timetableOnly?: boolean;
+  selectedStop?: number | null; onSelectStop?: (index: number) => void;
+  onDirectionChange?: (direction: number) => void;
+}
+
+export function TrainTable(props: TrainTableProps) {
+  return props.timetableOnly ? <OrderedTrainTable {...props} /> : <TimedTrainTable {...props} />;
+}
+
+function TimedTrainTable({ axis, st, others = [], related = [], links, group, plotH, tools }: TrainTableProps) {
   const w = world.value!;
   const names = stationNames(w), byId = stationsById(w);
   const n = axis.stops.length;
@@ -683,6 +692,136 @@ export function TrainTable({ axis, st, others = [], related = [], links, group, 
           <Chart hot={hot} key={axis.num} l={axis} st={st} links={links} width={vw + PAD_R} plotH={plotH} group={group} dir={dir}
             win={win} view={{ t0: day0 + left / scale, k: scale }} />
         )}
+      </div>
+    </div>
+  );
+}
+
+
+/** A full-height printed timetable: one fixed-width column per train, independent of the chart's time scale. */
+function OrderedTrainTable({ axis, st, others = [], related = [], tools, selectedStop, onSelectStop, onDirectionChange }: TrainTableProps) {
+  const w = world.value!;
+  const names = stationNames(w), byId = stationsById(w);
+  const n = axis.stops.length, shift = st.shift ?? 0;
+  const dark = uiShade.value === "dark";
+  const now = clock.minute.value * 60;
+  const day0 = Math.floor((now + shift) / HOUR) * HOUR - shift - HOUR;
+  const otherKey = others.map((o) => o.num).join(",");
+  const rel = display.value.chartOtherLines ? related : [];
+  const relKey = rel.map((r) => r.line.num).join(",");
+  const srcs = useMemo(() => sourcesOf(axis, others, rel), [axis.num, otherKey, relKey, w.version]);
+  const both = useColumns(srcs, n, day0);
+
+  const down = drawnReversed(byId.get(axis.stops[0]), byId.get(axis.stops[n - 1]), !!st.loop) ? 1 : 0;
+  const [pick, setPick] = useState<number | null>(null);
+  const dir = pick ?? down;
+  const cols = useMemo(() => [...(both?.[dir] ?? [])].sort((a, b) => a.t - b.t || a.key.localeCompare(b.key)), [both, dir]);
+  const times = useMemo(() => Float64Array.from(cols, (c) => c.t), [cols]);
+  const rowNames = Array.from({ length: n }, (_, i) => names.get(axis.stops[dir === 0 ? i : n - 1 - i]) ?? "");
+  const label = (d: number) => st.loop
+    ? t("schedulePanel.via", { station: names.get(axis.stops[d === 0 ? 1 : n - 2]) ?? "" })
+    : t("schedulePanel.to", { station: names.get(axis.stops[d === 0 ? n - 1 : 0]) ?? "" });
+
+  const scroller = useRef<HTMLDivElement>(null);
+  const vw = useClientWidth(scroller);
+  const [left, setLeft] = useState(0);
+  const drag = useRef<{ id: number; x: number; y: number; sl: number; st: number; moved: boolean } | null>(null);
+  const dragged = useRef(false);
+
+  // Show the current time near the left when opening or switching direction.
+  const placedFor = useRef("");
+  useLayoutEffect(() => {
+    const el = scroller.current, k = `${axis.num}:${dir}:${day0}:${otherKey}:${relKey}`;
+    if (!el || !both || !vw || placedFor.current === k) return;
+    placedFor.current = k;
+    const i = lowerBound(times, now);
+    el.scrollLeft = Math.max(0, GUTTER + (i - 4) * COL);
+    setLeft(el.scrollLeft);
+  }, [axis.num, dir, day0, otherKey, relKey, both, vw, times]);
+
+  // Preserve the ordinary timetable's mouse-drag scrolling, without chart zoom.
+  const onDown = (e: PointerEvent) => {
+    const el = scroller.current;
+    if (!el || e.button !== 0 || e.pointerType === "touch") return;
+    if (e.target === el && (e.offsetX >= el.clientWidth || e.offsetY >= el.clientHeight)) return;
+    dragged.current = false;
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: false };
+  };
+  const onMove = (e: PointerEvent) => {
+    const d = drag.current, el = scroller.current;
+    if (!d || !el || d.id !== e.pointerId) return;
+    if (!(e.buttons & 1)) { drag.current = null; el.classList.remove("dragging"); return; }
+    const z = zoomOf(el), dx = (e.clientX - d.x) / z, dy = (e.clientY - d.y) / z;
+    if (!d.moved && Math.hypot(dx, dy) < 4) return;
+    if (!d.moved) {
+      d.moved = true;
+      dragged.current = true;
+      el.classList.add("dragging");
+      el.setPointerCapture(e.pointerId);
+    }
+    el.scrollLeft = d.sl - dx;
+    el.scrollTop = d.st - dy;
+  };
+  const onUp = (e: PointerEvent) => {
+    const d = drag.current, el = scroller.current;
+    if (!d || !el || d.id !== e.pointerId) return;
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    el.classList.remove("dragging");
+    drag.current = null;
+  };
+
+  // Only mount columns near the viewport. All trains remain in the timetable.
+  const first = Math.max(0, Math.floor(Math.max(0, left - GUTTER) / COL) - 2);
+  const last = Math.min(cols.length, Math.ceil((left + vw - GUTTER) / COL) + 2);
+  const shown = Array.from({ length: Math.max(0, last - first) }, (_, i) => first + i);
+  const rowsH = n * ROW;
+  const tallest = Math.max(1, ...srcs.map((s) => (fits(s.bullet) ? 1 : Math.min(STRIP_MAX, [...s.bullet.letter].length))));
+  const HEAD = MARK_H + (tallest > 1 ? tallest * STRIP_CH + 6 : 20) + (srcs.some((s) => s.rank) ? REL_DROP : 0);
+  const timeLabel = (time: number) => {
+    const m = ((Math.floor((time + shift) / 60) % 1440) + 1440) % 1440;
+    return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  };
+
+  return (
+    <div class="tt tt-ordered">
+      <div class="sp-tabs">
+        <Segmented<number> options={[[down, label(down)], [1 - down, label(1 - down)]]} value={dir}
+          onChange={(d) => { setPick(d); onDirectionChange?.(d); }} />
+      </div>
+      <div class="tt-scroll" ref={scroller} onScroll={(e) => setLeft(e.currentTarget.scrollLeft)}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+        <div class="tt-inner" style={{ width: GUTTER + cols.length * COL + "px", height: HEAD + rowsH + "px" }}>
+          <div class="tt-head" style={{ height: HEAD + "px" }}>
+            <div class="tt-corner" style={{ width: GUTTER + "px" }} />
+            {shown.map((i) => {
+              const c = cols[i];
+              return <span key={c.key} class="tt-hour" style={{ left: GUTTER + i * COL + "px", width: COL + "px", paddingLeft: 0, textAlign: "center" }}>{timeLabel(c.t)}</span>;
+            })}
+            {shown.map((i) => {
+              const c = cols[i];
+              return <span key={c.key} class={"tt-bullet" + (c.rank ? " rel" : "")}
+                title={c.bullet.name} style={{ left: GUTTER + i * COL + "px", width: COL + "px", top: MARK_H + (c.rank ? REL_DROP : 0) + "px" }}>
+                <Bullet l={c.bullet} />
+              </span>;
+            })}
+          </div>
+          <div class="tt-body" style={{ height: rowsH + "px", "--row": ROW + "px" }}>            
+            <div class="tt-names" style={{ width: GUTTER + "px" }}>
+              {rowNames.map((name, row) => {
+                const index = dir === 0 ? row : n - 1 - row;
+                const selected = selectedStop === index;
+                return <button type="button" key={index} class={"tt-station" + (selected ? " selected" : "")}
+                  aria-pressed={selected} title={name}
+                  onClick={(e) => { if (!dragged.current || e.detail === 0) onSelectStop?.(index); }}>{name}</button>;
+              })}
+            </div>
+            {shown.map((i) => {
+              const c = cols[i];
+              return <Column key={c.key} c={c} x={GUTTER + (i + 0.5) * COL} cls={colClass(c, now)}
+                cells={<Cells c={c} shift={shift} />} dark={dark} width={COL} />;
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
