@@ -369,14 +369,16 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const down = drawnReversed(byId.get(l.stops[0]), byId.get(l.stops[n - 1]), !!st.loop) ? 1 : 0;
   const [direction, setDirection] = useState(down);
   const [patterns, setPatterns] = useState<[PatternDraft, PatternDraft]>(() => [emptyPattern(), emptyPattern()]);
-  const [settingKind, setSettingKind] = useState<"reference" | "dwell">("reference");
+  const [settingKind, setSettingKind] = useState<"reference" | "departure" | "dwell">("reference");
   const [showStationSettings, setShowStationSettings] = useState(true);
   const [showDepartures, setShowDepartures] = useState(false);
+  const [departureTimes, setDepartureTimes] = useState<Record<string, PatternTimes>>({});
   const [day, setDay] = useState<0 | 1>(0);
   const [passingStations, setPassingStations] = useState<Set<string>>(() => new Set());
   const [referenceMethods, setReferenceMethods] = useState<Record<string, ReferenceMethod>>({});
   const [referenceLineIds, setReferenceLineIds] = useState<Record<string, string>>({});
   const [referenceOffsets, setReferenceOffsets] = useState<Record<string, number>>({});
+  const [dwellTimes, setDwellTimes] = useState<Record<string, number>>({});
   const pattern = patterns[direction];
   const referenceName = pattern.reference === null ? "" : names.get(l.stops[pattern.reference]) ?? "";
 
@@ -398,47 +400,97 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const { links, related } = useRelated(l, st, useChartLinks(l, st));
   const any = related.length > 0 || (!!links && (links.shared.size > 0 || links.passes.length > 0));
 
+  
   const passingStation = selectedStop === null ? undefined : stationsById(w).get(l.stops[selectedStop]);
   const passingPossible = !!passingStation && passingStation.built && !passingStation.port && !passingStation.one
     && hasUpgrade(passingStation.upgrades, UPGRADE.passing)
     && w.edges.some((e) => (e.a === passingStation.num || e.b === passingStation.num) && e.tracks === 2);
-  const passingKey = passingStation ? `${l.id}:${passingStation.id}` : null;
-  const passingAssigned = passingKey !== null && passingStations.has(passingKey);
+  const passingKey = passingStation ? `${l.id}:${direction}:${passingStation.id}:${day}` : null;
+  const passingAssigned = (periods: readonly number[]) => passingKey !== null && periods.every((period) => passingStations.has(`${passingKey}:${period}`));
+  const passingPartial = (periods: readonly number[]) => passingKey !== null && periods.some((period) => passingStations.has(`${passingKey}:${period}`)) && !passingAssigned(periods);
 
-  const togglePassingStation = () => {
+  // Until connections across station complexes are supported, only passing-capable station nodes allow them.
+  const connectionPossible = passingPossible;
+
+  const setPassingStation = (periods: readonly number[], checked: boolean) => {
     if (!passingPossible || passingKey === null) return;
     setPassingStations((old) => {
       const next = new Set(old);
-      if (next.has(passingKey)) next.delete(passingKey);
-      else next.add(passingKey);
+      for (const period of periods) {
+        const key = `${passingKey}:${period}`;
+        if (checked) next.add(key);
+        else next.delete(key);
+      }
       return next;
     });
   };
 
   const referenceKey = selectedStop === null ? null : `${direction}:${selectedStop}`;
-  const referenceMethod = referenceKey === null ? "time" : referenceMethods[referenceKey] ?? "time";
+  const referenceMethod = referenceKey === null || !connectionPossible ? "time" : referenceMethods[referenceKey] ?? "time";
   const referenceStation = selectedStop === null ? null : l.stops[selectedStop];
   const referenceLines = referenceStation ? linesAt(referenceStation).filter((other) => other.id !== l.id) : [];
-  const referenceLineId = referenceKey === null ? null : referenceLineIds[referenceKey] ?? null;
-  const referenceOffsetKey = referenceKey !== null && referenceLineId !== null ? `${referenceKey}:${referenceMethod}:${day}:${referenceLineId}` : null;
-  const referenceOffset = referenceOffsetKey === null ? 0 : referenceOffsets[referenceOffsetKey] ?? 0;
-
-  const setReferenceOffset = (value: number) => {
-    if (referenceOffsetKey === null || !Number.isFinite(value)) return false;
-    setReferenceOffsets((old) => ({ ...old, [referenceOffsetKey]: Math.max(0, Math.round(value)) }));
-  };
+  const referenceLineKey = referenceKey === null ? null : `${referenceKey}:${referenceMethod}`;
+  const referenceLineId = referenceLineKey === null ? null : referenceLineIds[referenceLineKey] ?? null;
+  const selectedReferenceLine = referenceLines.find((other) => other.id === referenceLineId);
+  const shownReferenceLines = selectedReferenceLine ? [selectedReferenceLine] : referenceLines;
+  const referenceOffsetKey = referenceLineKey !== null && selectedReferenceLine ? `${referenceLineKey}:${day}:${selectedReferenceLine.id}` : null;
+  const referenceOffset = (periods: readonly number[]) => {
+    if (referenceOffsetKey === null) return 0;
+    const values = periods.map((period) => referenceOffsets[`${referenceOffsetKey}:${period}`] ?? 0);
+    return values.every((value) => value === values[0]) ? values[0] : null;
+  };0;
 
   const setReferenceMethod = (method: ReferenceMethod) => {
-    if (referenceKey === null) return;
+    if (referenceKey === null || (method !== "time" && !connectionPossible)) return;
     setReferenceMethods((old) => ({ ...old, [referenceKey]: method }));
   };
 
   const setReferenceLine = (id: string | null) => {
-    if (referenceKey === null) return;
+    if (referenceLineKey === null) return;
     setReferenceLineIds((old) => {
       const next = { ...old };
-      if (id === null || old[referenceKey] === id) delete next[referenceKey];
-      else next[referenceKey] = id;
+      if (id === null || old[referenceLineKey] === id) delete next[referenceLineKey];
+      else next[referenceLineKey] = id;
+      return next;
+    });
+  };
+
+  const stopDepartureTimes = referenceKey === null ? emptyPattern().times : departureTimes[referenceKey] ?? emptyPattern().times;
+
+  const setDepartureTime = (day: PatternDay, row: string, value: string) => {
+    if (referenceKey === null) return;
+    setDepartureTimes((old) => {
+      const current = old[referenceKey] ?? emptyPattern().times;
+      return {
+        ...old,
+        [referenceKey]: { ...current, [day]: { ...current[day], [row]: value } },
+      };
+    });
+  };
+
+  const setReferenceOffset = (periods: readonly number[], value: number) => {
+    if (referenceOffsetKey === null || !Number.isFinite(value)) return false;
+    setReferenceOffsets((old) => {
+      const next = { ...old };
+      for (const period of periods) next[`${referenceOffsetKey}:${period}`] = Math.max(0, Math.round(value));
+      return next;
+    });
+  };
+
+  const dwellKey = selectedStop === null ? null : `${direction}:${selectedStop}:${day}`;
+  const defaultDwell = Math.max(0, Math.round(st.dwellS / 60));
+
+  const dwellTime = (periods: readonly number[]) => {
+    if (dwellKey === null) return null;
+    const values = periods.map((period) => dwellTimes[`${dwellKey}:${period}`] ?? defaultDwell);
+    return values.every((value) => value === values[0]) ? values[0] : null;
+  };
+
+  const setDwellTime = (periods: readonly number[], value: number) => {
+    if (dwellKey === null || !Number.isFinite(value)) return false;
+    setDwellTimes((old) => {
+      const next = { ...old };
+      for (const period of periods) next[`${dwellKey}:${period}`] = Math.max(0, Math.round(value));
       return next;
     });
   };
@@ -459,94 +511,194 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
             <span class="sp-selected-station-title">
               <span class="st-glyph" aria-hidden="true" />
               <span class="sp-selected-station-name">{names.get(l.stops[selectedStop]) ?? ""}</span>
-            </span>
-            <span class="right">{settingKind === "reference" ? "基準時刻指定" : "停車時間指定"}</span>
-          </div>
-          <div class="h set-by sp-settings-switch">
-            設定項目
-            <span class="right">
-              <Segmented<"reference" | "dwell">
-                options={[["reference", "基準時刻"], ["dwell", "停車時間"]]}
-                value={settingKind}
-                onChange={setSettingKind}
-              />
-            </span>
-          </div>
-          {settingKind === "reference" && (
-            <>
-              <div class="h set-by sp-settings-switch sp-reference-method">
-                基準方法
-                <span class="right">
-                  <Segmented<ReferenceMethod>
-                    options={[
-                      ["time", "指定時刻基準"],
-                      ["departure", "他路線出発基準"],
-                      ["arrival", "他路線到着基準"],
-                    ]}
-                    value={referenceMethod}
-                    onChange={setReferenceMethod}
-                  />
-                </span>
-              </div>
-
-              {referenceMethod === "time" ? (
-                <ReferenceTimes st={st} day={day === 0 ? "weekday" : "weekend"}
-                  active={pattern.reference === selectedStop} referenceName={referenceName}
-                  onReference={setReference} times={pattern.times} onTime={setReferenceTime} />
-              ) : (
-              <div class="sp-reference-lines">
-                {referenceLines.length ? (
-                  <>
-                    <ul class="rows pick">
-                      {referenceLines.map((other) => (
-                        <li key={other.id} class={referenceLineId === other.id ? "on" : ""}
-                          role="button" tabIndex={0} aria-pressed={referenceLineId === other.id}
-                          onClick={() => setReferenceLine(other.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setReferenceLine(other.id);
-                            }
-                          }}>
-                          <Chip line={other} />
-                          <span class="grow">{other.name}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    {referenceLineId !== null && (
-                      <div class="sp-reference-offset">
-                        <span>{referenceMethod === "arrival" ? "選択した路線の到着の" : "選択した路線の発車の"}</span>
-                        <Stepper wide jump jumpUnit={t("schedule.minUnit")}
-                          label={referenceMethod === "arrival" ? "基準路線の到着からの発車時刻差" : "基準路線の発車からの発車時刻差"}
-                          value={t("inspector.min", { n: referenceOffset })}
-                          onStep={(s) => setReferenceOffset(referenceOffset + s)}
-                          type={{ text: String(referenceOffset), set: setReferenceOffset }} />
-                        <span>後に発車</span>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p class="muted">この駅に停車する他の路線はありません。</p>
-                )}
-              </div>
-              )}
-            </>
-          )}
-          {passingPossible && (
-            <div class="sched-default sp-passing-setting">
-              <div class="sched-default-head">待避駅設定</div>
-              <div class="sched-default-btns">
-                <button type="button" class="btn text mini" aria-pressed={passingAssigned} onClick={togglePassingStation}>
-                  {passingAssigned ? "待避駅指定を解除" : "ここを待避駅に指定する"}
-                </button>
-              </div>
+            </span>            
+            <span class="right">{settingKind === "reference" ? "基準時刻指定" : settingKind === "departure" ? "発車時刻指定" : "停車時間指定"}</span>
             </div>
-          )}
+            <div class="h set-by sp-settings-switch">
+              設定項目
+              <span class="right">
+                <Segmented<"reference" | "departure" | "dwell">
+                  options={[["reference", "基準時刻"], ["departure", "発車時刻"], ["dwell", "停車時間"]]}
+                  value={settingKind}
+                  onChange={setSettingKind}
+                />
+              </span>
+            </div>
+            {settingKind === "reference" && (
+              <ReferenceTimes st={st} day={day === 0 ? "weekday" : "weekend"}
+                active={pattern.reference === selectedStop} referenceName={referenceName}
+                onReference={setReference} times={pattern.times} onTime={setReferenceTime} />
+            )}
+            {settingKind === "departure" && (
+              <>
+                <div class="h set-by sp-settings-switch">
+                  発車方法
+                  <span class="right">
+                    <Segmented<ReferenceMethod>
+                      options={[
+                        ["time", "時刻指定"],
+                        ["departure", "他路線出発待"],
+                        ["arrival", "他路線到着待"],
+                      ]}
+                      value={referenceMethod}
+                      onChange={setReferenceMethod}
+                      disabled={(method) => method !== "time" && !connectionPossible}
+                    />
+                  </span>
+                </div>
+
+                {referenceMethod === "time" ? (
+                  <div class="sp-reference">
+                    <table class="sched sp-reference-table">
+                      <thead>
+                        <tr>
+                          <th>{t("schedule.period")}</th>
+                          <th>発車時刻</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rowsOf(rowCount(st)).map((row, i) => (
+                          <tr key={row.code}>
+                            <td>
+                              <span class="sp-reference-period">
+                                <span>{rowLabel(rowCount(st), i)}</span>
+                                <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
+                              </span>
+                            </td>
+                            <td>
+                              <ReferenceTimeInput key={`${direction}:${selectedStop}:${day}:${row.code}`}
+                                st={st} row={row}
+                                value={stopDepartureTimes[day === 0 ? "weekday" : "weekend"][row.code] ?? ""}
+                                disabled={false}
+                                label={`${names.get(l.stops[selectedStop!]) ?? ""} ${rowLabel(rowCount(st), i)} 発車時刻`}
+                                onTime={(value) => setDepartureTime(day === 0 ? "weekday" : "weekend", row.code, value)} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (                  
+                  <div class="sp-reference-lines">
+                    {shownReferenceLines.length ? (
+                      <>
+                        <ul class="rows pick">
+                          {shownReferenceLines.map((other) => (
+                            <li key={other.id} class={referenceLineId === other.id ? "on" : ""}
+                              role="button" tabIndex={0} aria-pressed={referenceLineId === other.id}
+                              onClick={() => setReferenceLine(other.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setReferenceLine(other.id);
+                                }
+                              }}>
+                              <Chip line={other} />
+                              <span class="grow">{other.name}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {selectedReferenceLine && (
+                          <div class="sp-reference-offsets">
+                            <span class="muted">{referenceMethod === "arrival" ? "選択した路線の到着から" : "選択した路線の発車から"}</span>
+                            <table class="sched sp-reference-table">
+                              <thead>
+                                <tr>
+                                  <th>{t("schedule.period")}</th>
+                                  <th>待ち時間</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rowsOf(rowCount(st)).map((row, i) => {
+                                  const offset = referenceOffset(row.periods);
+                                  return (
+                                    <tr key={row.code}>
+                                      <td>
+                                        <span class="sp-reference-period">
+                                          <span>{rowLabel(rowCount(st), i)}</span>
+                                          <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <Stepper wide jump jumpUnit={t("schedule.minUnit")}
+                                          label={`${rowLabel(rowCount(st), i)}の待ち時間`}
+                                          value={offset === null ? "—" : t("inspector.min", { n: offset })}
+                                          onStep={(s) => setReferenceOffset(row.periods, (offset ?? 0) + s)}
+                                          type={{ text: String(offset ?? 0), set: (value) => setReferenceOffset(row.periods, value) }} />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                            <span class="muted">後に発車</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p class="muted">この駅に停車する他の路線はありません。</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+            {settingKind === "dwell" && (
+              <div class="sp-reference sp-dwell-times">
+                <table class="sched sp-reference-table">
+                  <thead>
+                    <tr>
+                      <th>{t("schedule.period")}</th>
+                      <th>停車時間</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowsOf(rowCount(st)).map((row, i) => {
+                      const dwell = dwellTime(row.periods);
+                      return (
+                        <tr key={row.code}>
+                          <td>
+                            <span class="sp-reference-period">
+                              <span>{rowLabel(rowCount(st), i)}</span>
+                              <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
+                            </span>
+                          </td>
+                          <td>
+                            <Stepper wide jump jumpUnit={t("schedule.minUnit")}
+                              label={`${rowLabel(rowCount(st), i)}の停車時間`}
+                              value={dwell === null ? "—" : t("inspector.min", { n: dwell })}
+                              onStep={(s) => setDwellTime(row.periods, (dwell ?? defaultDwell) + s)}
+                              type={{ text: String(dwell ?? defaultDwell), set: (value) => setDwellTime(row.periods, value) }} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {passingPossible && (
+              <details class="sched-default sp-passing-setting">
+                <summary class="sched-default-head">待避設定</summary>
+                <div class="sp-passing-rows">
+                  {rowsOf(rowCount(st)).map((row, i) => (
+                    <label key={row.code} class="check">
+                      <input type="checkbox" checked={passingAssigned(row.periods)}
+                        class={passingPartial(row.periods) ? "some" : undefined}
+                        aria-checked={passingPartial(row.periods) ? "mixed" : passingAssigned(row.periods)}
+                        onChange={(e) => setPassingStation(row.periods, e.currentTarget.checked)} />
+                      <span>{rowLabel(rowCount(st), i)}</span>
+                      <small class="muted">{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
+                    </label>
+                  ))}
+                </div>
+              </details>
+            )}
         </div>
       )}
       {selectedStop !== null && showDepartures && (
-        <Board key={l.num} l={l} st={st} selectedStation={l.stops[selectedStop]} />
+        <div class="sp-settings-board">
+          <Board key={l.num} l={l} st={st} selectedStation={l.stops[selectedStop]} />
+        </div>
       )}
     </div>
     <div class="sp-right">
