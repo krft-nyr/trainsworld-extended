@@ -257,9 +257,8 @@ function LineBody({ l, st }: { l: LineInput; st: LineStats }) {
 
 type PatternDay = "weekday" | "weekend";
 type PatternTimes = Record<PatternDay, Record<string, string>>;
-interface PatternDraft { reference: number | null; times: PatternTimes }
 
-const emptyPattern = (): PatternDraft => ({ reference: null, times: { weekday: {}, weekend: {} } });
+const emptyPatternTimes = (): PatternTimes => ({ weekday: {}, weekend: {} });
 
 type ReferenceTimeRange = readonly [number, number];
 
@@ -368,8 +367,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const n = l.stops.length;
   const down = drawnReversed(byId.get(l.stops[0]), byId.get(l.stops[n - 1]), !!st.loop) ? 1 : 0;
   const [direction, setDirection] = useState(down);
-  const [patterns, setPatterns] = useState<[PatternDraft, PatternDraft]>(() => [emptyPattern(), emptyPattern()]);
-  const [settingKind, setSettingKind] = useState<"reference" | "departure" | "dwell">("reference");
+  const [settingKind, setSettingKind] = useState<"departure" | "dwell">("departure");
   const [showStationSettings, setShowStationSettings] = useState(true);
   const [showDepartures, setShowDepartures] = useState(false);
   const [departureTimes, setDepartureTimes] = useState<Record<string, PatternTimes>>({});
@@ -378,23 +376,8 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const [referenceMethods, setReferenceMethods] = useState<Record<string, ReferenceMethod>>({});
   const [referenceLineIds, setReferenceLineIds] = useState<Record<string, string>>({});
   const [referenceOffsets, setReferenceOffsets] = useState<Record<string, number>>({});
+  const [specifiedReferenceLines, setSpecifiedReferenceLines] = useState<Set<string>>(() => new Set());
   const [dwellTimes, setDwellTimes] = useState<Record<string, number>>({});
-  const pattern = patterns[direction];
-  const referenceName = pattern.reference === null ? "" : names.get(l.stops[pattern.reference]) ?? "";
-
-  const setReference = () => {
-    if (selectedStop === null) return;
-    setPatterns((old) => old.map((p, i) => i === direction
-      ? p.reference === selectedStop
-        ? { ...p, reference: null }
-        : { reference: selectedStop, times: emptyPattern().times }
-      : p) as [PatternDraft, PatternDraft]);
-  };
-  const setReferenceTime = (day: PatternDay, row: string, value: string) => {
-    setPatterns((old) => old.map((p, i) => i === direction ? {
-      ...p, times: { ...p.times, [day]: { ...p.times[day], [row]: value } },
-    } : p) as [PatternDraft, PatternDraft]);
-  };
 
   const [selectedStop, setSelectedStop] = useState<number | null>(null);
   const { links, related } = useRelated(l, st, useChartLinks(l, st));
@@ -430,10 +413,11 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
   const referenceStation = selectedStop === null ? null : l.stops[selectedStop];
   const referenceLines = referenceStation ? linesAt(referenceStation).filter((other) => other.id !== l.id) : [];
   const referenceLineKey = referenceKey === null ? null : `${referenceKey}:${referenceMethod}`;
-  const referenceLineId = referenceLineKey === null ? null : referenceLineIds[referenceLineKey] ?? null;
+  const specifyReferenceLine = referenceLineKey !== null && specifiedReferenceLines.has(referenceLineKey);
+  const referenceLineId = referenceLineKey === null || !specifyReferenceLine ? null : referenceLineIds[referenceLineKey] ?? null;
   const selectedReferenceLine = referenceLines.find((other) => other.id === referenceLineId);
   const shownReferenceLines = selectedReferenceLine ? [selectedReferenceLine] : referenceLines;
-  const referenceOffsetKey = referenceLineKey !== null && selectedReferenceLine ? `${referenceLineKey}:${day}:${selectedReferenceLine.id}` : null;
+  const referenceOffsetKey = referenceLineKey === null ? null : `${referenceLineKey}:${day}`;
   const referenceOffset = (periods: readonly number[]) => {
     if (referenceOffsetKey === null) return 0;
     const values = periods.map((period) => referenceOffsets[`${referenceOffsetKey}:${period}`] ?? 0);
@@ -455,12 +439,22 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
     });
   };
 
-  const stopDepartureTimes = referenceKey === null ? emptyPattern().times : departureTimes[referenceKey] ?? emptyPattern().times;
+  const setSpecifyReferenceLine = (checked: boolean) => {
+    if (referenceLineKey === null) return;
+    setSpecifiedReferenceLines((old) => {
+      const next = new Set(old);
+      if (checked) next.add(referenceLineKey);
+      else next.delete(referenceLineKey);
+      return next;
+    });
+  };
+
+  const stopDepartureTimes = referenceKey === null ? emptyPatternTimes() : departureTimes[referenceKey] ?? emptyPatternTimes();
 
   const setDepartureTime = (day: PatternDay, row: string, value: string) => {
     if (referenceKey === null) return;
     setDepartureTimes((old) => {
-      const current = old[referenceKey] ?? emptyPattern().times;
+      const current = old[referenceKey] ?? emptyPatternTimes();
       return {
         ...old,
         [referenceKey]: { ...current, [day]: { ...current[day], [row]: value } },
@@ -512,23 +506,18 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
               <span class="st-glyph" aria-hidden="true" />
               <span class="sp-selected-station-name">{names.get(l.stops[selectedStop]) ?? ""}</span>
             </span>            
-            <span class="right">{settingKind === "reference" ? "基準時刻指定" : settingKind === "departure" ? "発車時刻指定" : "停車時間指定"}</span>
+            <span class="right">{settingKind === "departure" ? "発車時刻指定" : "停車時間指定"}</span>
             </div>
             <div class="h set-by sp-settings-switch">
               設定項目
               <span class="right">
-                <Segmented<"reference" | "departure" | "dwell">
-                  options={[["reference", "基準時刻"], ["departure", "発車時刻"], ["dwell", "停車時間"]]}
+                <Segmented<"departure" | "dwell">
+                  options={[["departure", "発車時刻"], ["dwell", "停車時間"]]}
                   value={settingKind}
                   onChange={setSettingKind}
                 />
               </span>
             </div>
-            {settingKind === "reference" && (
-              <ReferenceTimes st={st} day={day === 0 ? "weekday" : "weekend"}
-                active={pattern.reference === selectedStop} referenceName={referenceName}
-                onReference={setReference} times={pattern.times} onTime={setReferenceTime} />
-            )}
             {settingKind === "departure" && (
               <>
                 <div class="h set-by sp-settings-switch">
@@ -536,7 +525,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                   <span class="right">
                     <Segmented<ReferenceMethod>
                       options={[
-                        ["time", "時刻指定"],
+                        ["time", "基準時刻"],
                         ["departure", "他路線出発待"],
                         ["arrival", "他路線到着待"],
                       ]}
@@ -553,7 +542,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                       <thead>
                         <tr>
                           <th>{t("schedule.period")}</th>
-                          <th>発車時刻</th>
+                          <th>基準時刻</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -570,7 +559,7 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                                 st={st} row={row}
                                 value={stopDepartureTimes[day === 0 ? "weekday" : "weekend"][row.code] ?? ""}
                                 disabled={false}
-                                label={`${names.get(l.stops[selectedStop!]) ?? ""} ${rowLabel(rowCount(st), i)} 発車時刻`}
+                                label={`${names.get(l.stops[selectedStop!]) ?? ""} ${rowLabel(rowCount(st), i)} 基準時刻`}
                                 onTime={(value) => setDepartureTime(day === 0 ? "weekday" : "weekend", row.code, value)} />
                             </td>
                           </tr>
@@ -580,8 +569,12 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                   </div>
                 ) : (                  
                   <div class="sp-reference-lines">
-                    {shownReferenceLines.length ? (
-                      <>
+                    <Check checked={specifyReferenceLine} onChange={setSpecifyReferenceLine}>
+                      {referenceMethod === "arrival" ? "路線を指定して到着待" : "路線を指定して発車待"}
+                    </Check>
+
+                    {specifyReferenceLine && (
+                      referenceLines.length ? (
                         <ul class="rows pick">
                           {shownReferenceLines.map((other) => (
                             <li key={other.id} class={referenceLineId === other.id ? "on" : ""}
@@ -598,46 +591,49 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
                             </li>
                           ))}
                         </ul>
-                        {selectedReferenceLine && (
-                          <div class="sp-reference-offsets">
-                            <span class="muted">{referenceMethod === "arrival" ? "選択した路線の到着から" : "選択した路線の発車から"}</span>
-                            <table class="sched sp-reference-table">
-                              <thead>
-                                <tr>
-                                  <th>{t("schedule.period")}</th>
-                                  <th>待ち時間</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {rowsOf(rowCount(st)).map((row, i) => {
-                                  const offset = referenceOffset(row.periods);
-                                  return (
-                                    <tr key={row.code}>
-                                      <td>
-                                        <span class="sp-reference-period">
-                                          <span>{rowLabel(rowCount(st), i)}</span>
-                                          <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
-                                        </span>
-                                      </td>
-                                      <td>
-                                        <Stepper wide jump jumpUnit={t("schedule.minUnit")}
-                                          label={`${rowLabel(rowCount(st), i)}の待ち時間`}
-                                          value={offset === null ? "—" : t("inspector.min", { n: offset })}
-                                          onStep={(s) => setReferenceOffset(row.periods, (offset ?? 0) + s)}
-                                          type={{ text: String(offset ?? 0), set: (value) => setReferenceOffset(row.periods, value) }} />
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                            <span class="muted">後に発車</span>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p class="muted">この駅に停車する他の路線はありません。</p>
+                      ) : (
+                        <p class="muted">この駅に停車する他の路線はありません。</p>
+                      )
                     )}
+
+                    {!specifyReferenceLine && (
+                      <p class="muted">参照路線：自動選択</p>
+                    )}
+
+                    <div class="sp-reference-offsets">
+                      <span class="muted">{referenceMethod === "arrival" ? "他路線の到着から" : "他路線の発車から"}</span>
+                      <table class="sched sp-reference-table">
+                        <thead>
+                          <tr>
+                            <th>{t("schedule.period")}</th>
+                            <th>待ち時間</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rowsOf(rowCount(st)).map((row, i) => {
+                            const offset = referenceOffset(row.periods);
+                            return (
+                              <tr key={row.code}>
+                                <td>
+                                  <span class="sp-reference-period">
+                                    <span>{rowLabel(rowCount(st), i)}</span>
+                                    <small>{rowHoursText(st.hours ?? CUTS_DEFAULT, row)}</small>
+                                  </span>
+                                </td>
+                                <td>
+                                  <Stepper wide jump jumpUnit={t("schedule.minUnit")}
+                                    label={`${rowLabel(rowCount(st), i)}の待ち時間`}
+                                    value={offset === null ? "—" : t("inspector.min", { n: offset })}
+                                    onStep={(s) => setReferenceOffset(row.periods, (offset ?? 0) + s)}
+                                    type={{ text: String(offset ?? 0), set: (value) => setReferenceOffset(row.periods, value) }} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <span class="muted">後に発車</span>
+                    </div>
                   </div>
                 )}
               </>

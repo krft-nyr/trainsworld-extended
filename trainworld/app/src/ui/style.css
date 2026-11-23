@@ -334,6 +334,7 @@ svg .stroke2 { stroke-width: 2; }
 .sched-panel.settings .sp-reference-offsets .sp-reference-table td:last-child { text-align: right; }
 .sched-panel.settings .sp-reference-offsets .stepper { white-space: nowrap; }
 .sched-panel.settings .sp-dwell-times .sp-reference-table td:last-child { text-align: right; }
+.sched-panel.settings .sp-reference-lines > .rows.pick { margin-top: 8px; }
 .saves-head.sp-title h2 { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
 .sp-title .sp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-title .sp-word { color: var(--muted); font-weight: 400; font-size: 14px; }
