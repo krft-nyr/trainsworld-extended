@@ -287,7 +287,7 @@ svg .stroke2 { stroke-width: 2; }
 .sched-panel.settings .sp-reference-time-field input[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
 .sched-panel.settings .sp-reference-invalid { color: var(--bad); font-size: 10px; text-align: right; }
 /* The selected station heading reuses the station inspector's station glyph. */
-.sched-panel.settings .sp-selected-station-heading { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; }
+.sched-panel.settings .sp-selected-station-heading > .group { flex: none; margin-left: auto; font-weight: 400; }
 .sched-panel.settings .sp-selected-station-title { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
 .sched-panel.settings .sp-selected-station-title .st-glyph { width: 18px; height: 18px; }
 .sched-panel.settings .sp-selected-station-title .st-glyph::after { width: 9px; height: 9px; border-width: 2px; }

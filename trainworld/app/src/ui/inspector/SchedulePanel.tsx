@@ -509,21 +509,15 @@ function SettingsBody({ l, st }: { l: LineInput; st: LineStats }) {
       {selectedStop !== null && showStationSettings && (
         <div class="sp-station-settings">
           <div class="h sp-selected-station-heading">
-            <span class="sp-selected-station-title">
-              <span class="st-glyph" aria-hidden="true" />
-              <span class="sp-selected-station-name">{names.get(l.stops[selectedStop]) ?? ""}</span>
-            </span>            
-            <span class="right">{settingKind === "departure" ? "発車時刻指定" : "停車時間指定"}</span>
-            </div>
-            <div class="h set-by sp-settings-switch">
-              設定項目
-              <span class="right">
-                <Segmented<"departure" | "dwell">
-                  options={[["departure", "発車条件"], ["dwell", "停車時間"]]}
-                  value={settingKind}
-                  onChange={setSettingKind}
-                />
+              <span class="sp-selected-station-title">
+                <span class="st-glyph" aria-hidden="true" />
+                <span class="sp-selected-station-name">{names.get(l.stops[selectedStop]) ?? ""}</span>
               </span>
+              <Segmented<"departure" | "dwell">
+                options={[["departure", "発車条件"], ["dwell", "停車時間"]]}
+                value={settingKind}
+                onChange={setSettingKind}
+              />
             </div>
             {settingKind === "departure" && (
               <>
