@@ -724,7 +724,7 @@ async function processMessage(msg: ToClock) {
 };
 
 let maskedRoute = "";
-const routeKey = (r: RouteAsk) => `${trackVersion}|${JSON.stringify([r.from, r.to, r.pis, !!r.single, !!r.quad, !!r.through, designOf(r), r.flyover ?? null, !!r.hsr, !!r.tram, !!r.street, r.street ? r.streetLine ?? null : null, !!r.ramp, r.beside ?? null])}`;
+const routeKey = (r: RouteAsk) => `${trackVersion}|${JSON.stringify([r.from, r.to, r.pis, !!r.single, !!r.quad, !!r.through, designOf(r), r.flyover ?? null, !!r.hsr, !!r.tram, !!r.street, r.street ? r.streetLine ?? null : null, !!r.ramp, r.beside ?? null, r.besideSpacing ?? 12])}`;
 
 /** An answer for a message the track model could not work out, so nothing waits on it for ever. */
 function failAnswer(msg: ToClock) { // i18n-ignore

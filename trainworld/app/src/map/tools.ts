@@ -31,7 +31,7 @@ import { activeCity, worldFrameEpoch } from "../game/cities";
 import { demandView } from "../game/demand";
 import { settleNewLineColour } from "../game/lineColour";
 import { metresBetween } from "../game/walks";
-import { ask, autoRamp, buildLevel, buildPlatform, buildTramPlatform, designSpeed, flyoverSpeed, highSpeed, keepPlacing, lineDraft, newLine, quadTrack, selection, singleTrack, besideOn, snapping, snapMode, snapRealTram, snapRoads, snapStreets, stationOnTram, stationOneTrack, tool, tramTrack } from "../game/ui";
+import { ask, autoRamp, buildLevel, buildPlatform, buildTramPlatform, designSpeed, flyoverSpeed, highSpeed, keepPlacing, lineDraft, newLine, quadTrack, selection, singleTrack, besideOn, besideSpacing, snapping, snapMode, snapRealTram, snapRoads, snapStreets, stationOnTram, stationOneTrack, tool, tramTrack } from "../game/ui";
 import { type Removable } from "../game/remove";
 import { loadPlacesAt } from "../game/placeList";
 import { warmStreetNames } from "./stationNames";
@@ -65,7 +65,7 @@ import { startBuildingFloors } from "./buildingFloors";
 import { playBuild } from "./buildSound";
 import { perfOff } from "../perfFlags";
 import { guessRow, settleRow } from "../ui/inspector/stopRowGuess";
-import { type LngLatish, SNAP_EDGE_PX, TRACK_NODE_PX, TRACK_EDGE_PX, DEAD_PX, DOT_MIN_PX, HELD_NEAR_PX, HELD_START_PX, BESIDE_PX, OVERLAP_PX, type Snap, type Spot, type Verdict, BESIDE_SPACING_M, LANE_HALF_M, type Placed, MAX_PIECE_KM, WAIT_MS, tooFarText, placedAt } from "./toolParts";
+import { type LngLatish, SNAP_EDGE_PX, TRACK_NODE_PX, TRACK_EDGE_PX, DEAD_PX, DOT_MIN_PX, HELD_NEAR_PX, HELD_START_PX, BESIDE_PX, OVERLAP_PX, type Snap, type Spot, type Verdict, LANE_HALF_M, type Placed, MAX_PIECE_KM, WAIT_MS, tooFarText, placedAt } from "./toolParts";
 import { nearTouch, touchConfirm, touchBack, touchStop, dragHandle, placeTouch } from "./toolTouch";
 import { nameAhead, stationClick, askLegs, placePending, layout } from "./stationTool";
 import { clearDelHover, deleteHover, deleteClick } from "./toolDelete";
@@ -225,7 +225,15 @@ export class Tools {
       this.place();
     }, () => this.place(), () => this.freeLevel(), () => ({ design: designSpeed.peek(), hsr: highSpeed.peek(), quad: quadTrack.peek() }));
     effect(() => { tool.value; tramTrack.value; snapStreets.value; snapRoads.value; snapRealTram.value; this.streetSwitch(); });
-    effect(() => { besideOn.value; this.place(); });
+    effect(() => {
+      besideOn.value; besideSpacing.value;
+      if (tool.peek() === "track" && this.pointer) {
+        const p = this.pointer;
+        this.hoverBeside = this.hover?.kind === "free" && !this.snapped && !this.straightOn() ? this.besideAt(p.px, p.py) : null;
+        if (this.start) this.requestPreview();
+      }
+      this.place();
+    });
     // T-1260: the touch control bar and the handle that drags the point being previewed
     this.touchHost = document.createElement("div");
     this.touchHost.className = "touch-bar-host";
@@ -531,7 +539,7 @@ export class Tools {
   }
 
   /** T-1685: with Snap beside on, open ground within BESIDE_PX of track: the nearest piece, and the
-   * spot BESIDE_SPACING_M from it on the pointer's side (local units) */
+   * spot `besideSpacing` from it on the pointer's side (local units) */
   besideAt(px: number, py: number): { edge: number; lx: number; ly: number } | null {
     const n = this.overlay.renderer.net;
     const at = pointerLocal(this.overlay, px, py);
@@ -551,7 +559,7 @@ export class Tools {
         const ux = pts[k + 3] - pts[k], uy = pts[k + 4] - pts[k + 1], ul = Math.hypot(ux, uy) || 1;
         const fx = pts[k] + ux * t, fy = pts[k + 1] + uy * t;
         const side = Math.sign(ux * (at[1] - fy) - uy * (at[0] - fx)) || 1;
-        hit = { edge, lx: fx - (uy / ul) * BESIDE_SPACING_M * side, ly: fy + (ux / ul) * BESIDE_SPACING_M * side };
+        hit = { edge, lx: fx - (uy / ul) * besideSpacing.peek() * side, ly: fy + (ux / ul) * besideSpacing.peek() * side };
       }
     }
     return hit;
@@ -923,7 +931,7 @@ export class Tools {
   }
 
   routeReq(to: RouteEnd, by: { edge: number } | null = this.hoverBeside, at: Snap | null = this.hover) {
-    const beside: { beside?: [number, number] } = by && to.kind === "free" ? { beside: [this.start!.beside ?? 0xffffffff, by.edge] } : {};
+    const beside: { beside?: [number, number]; besideSpacing?: number } = by && to.kind === "free" ? { beside: [this.start!.beside ?? 0xffffffff, by.edge], besideSpacing: besideSpacing.peek() } : {};
     return { from: this.start!.end, to, pis: [], single: singleTrack.peek(), quad: quadTrack.peek(), through: true, design: designSpeed.peek(), flyover: flyoverSpeed.peek(), hsr: highSpeed.peek(), tram: tramTrack.peek(), ramp: autoRamp.peek() && !tramTrack.peek(), ...beside, ...this.joinReq(at) };
   }
 

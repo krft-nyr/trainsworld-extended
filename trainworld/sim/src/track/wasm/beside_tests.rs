@@ -8,6 +8,29 @@ fn nearest(a: &TrackApi, edges: &[u32], x: f64, y: f64) -> u32 {
     *edges.iter().min_by(|&&p, &&q| a.w.net.project(p, x, y).1.total_cmp(&a.w.net.project(q, x, y).1)).unwrap()
 }
 
+/// The drawing tool's beside distance is used by the actual route, not only its preview.
+#[test]
+fn route_beside_custom_spacing() {
+    for spacing in [6.0, 8.0, 12.0, 24.0] {
+        let mut a = TrackApi::new(-73.985, 40.758, true);
+        a.set_route_tangent(true);
+        assert_eq!(a.add_route(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2000.0, 0.0, 0.0], &[], 1, false), 0, "{}", a.issues());
+        let old = live(&a);
+        let ends = [0.0, 0.0, 200.0, spacing, 0.0, 0.0, 0.0, 1800.0, spacing, 0.0];
+        a.set_route_beside_spacing(spacing);
+        a.set_route_beside(u32::MAX, old[0]);
+        assert_eq!(a.add_route(&ends, &[], 1, false), 0, "spacing {spacing}: {}", a.issues());
+        let new: Vec<u32> = live(&a).into_iter().filter(|e| !old.contains(e)).collect();
+        assert!(!new.is_empty());
+        for &e in &new {
+            for p in a.edge_render(e).chunks(3) {
+                let off = a.w.net.project(old[0], p[0], p[1]).1;
+                assert!((off - spacing).abs() < 0.1, "spacing {spacing}, actual {off}");
+            }
+        }
+    }
+}
+
 /// T-1685: a route drawn beside a curved run of single track (two pieces) runs `beside::BESIDE_SPACING`
 /// from it all along, curves included, on the side its end is; without `set_route_beside` the
 /// same ends make a plain route that does not.

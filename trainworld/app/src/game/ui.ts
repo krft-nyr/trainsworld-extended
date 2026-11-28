@@ -207,7 +207,7 @@ export interface DockLayout {
  * saved the old default with everything else, so that setting is dropped once and the new default applies; 9 since the ramp's ends are lighter (T-1138); 10 since the track display starts on Line (T-1244); 11 since the station circles start off (T-1585); 12 since lines side by side are on (T-2346); 13 since everyone starts on High map detail (T-2840); 14 since the currency starts from the browser's region (T-2860). */
 const VERSION = 15;
 
-function load(): Partial<{ tab: Tab; theme: Theme; shade: Shade; display: Partial<DisplaySettings>; dock: DockLayout; build: Partial<{ level: Level; ramp: boolean; tracks: 1 | 2 | 4; hsr: boolean; tram: boolean; keep: boolean; snap: boolean; tramSnap: boolean; streets: boolean; roads: boolean; beside: boolean; design: number; fly: number; advanced: boolean; platform: number; tramPlatform: number; oneTrack: boolean }>; guide: boolean; v: number }> {
+function load(): Partial<{ tab: Tab; theme: Theme; shade: Shade; display: Partial<DisplaySettings>; dock: DockLayout; build: Partial<{ level: Level; ramp: boolean; tracks: 1 | 2 | 4; hsr: boolean; tram: boolean; keep: boolean; snap: boolean; tramSnap: boolean; streets: boolean; roads: boolean; beside: boolean; besideSpacing: number; design: number; fly: number; advanced: boolean; platform: number; tramPlatform: number; oneTrack: boolean }>; guide: boolean; v: number }> {
   try {
     return JSON.parse(localStorage.getItem(STORE) || "{}");
   } catch {
@@ -387,6 +387,9 @@ export const snapRoads = signal(saved.build?.roads === true && saved.build?.snap
 /** T-1685: track drawn from beside existing track runs alongside it (`TrackApi::set_route_beside`) */
 // T-3046: the two snaps exclude each other in the bar; a save holding both keeps the real network
 export const snapBeside = signal(saved.build?.beside === true && saved.build?.snap !== true);
+/** Centre-to-centre spacing for track drawn beside existing track, metres. */
+export const clampBesideSpacing = (m: number): number => Number.isFinite(m) ? Math.round(Math.max(6, Math.min(24, m)) * 10) / 10 : 12;
+export const besideSpacing = signal(clampBesideSpacing(saved.build?.besideSpacing ?? 12));
 /** T-817: the speed the track tool lays curves out for, km/h (`TrackApi::set_design_speed`): T-3121,
  * any speed from DESIGN_MIN to DESIGN_MAX, typed in or stepped through DESIGN_SPEEDS. */
 export const DESIGN_SPEEDS = [20, 40, 60, 80, 100, 120, 140, 160, 200, 250, 320] as const;
@@ -533,7 +536,7 @@ if (typeof window !== "undefined") {
 void loadNunito().then(() => document.dispatchEvent?.(new Event("tw-fontchange")));
 effect(() => {
   if (VIDEO) return; // T-2774
-  const s = { tab: tab.value, theme:theme.value, shade: shade.value, display: display.value, dock: dockLayout.value, build: { level: buildLevel.value, ramp: autoRamp.value, hsr: highSpeed.value, tram: tramTrack.value, tracks: countPicked.value, keep: keepPlacing.value, snap: snapReal.value, tramSnap: snapRealTram.value, streets: snapStreets.value, roads: snapRoads.value, beside: snapBeside.value, design: designSpeed.value, fly: flyoverSpeed.value, advanced: buildAdvanced.value, platform: buildPlatform.value, tramPlatform: buildTramPlatform.value, oneTrack: stationOneTrack.value }, guide: guideFinished.value, v: VERSION };
+  const s = { tab: tab.value, theme:theme.value, shade: shade.value, display: display.value, dock: dockLayout.value, build: { level: buildLevel.value, ramp: autoRamp.value, hsr: highSpeed.value, tram: tramTrack.value, tracks: countPicked.value, keep: keepPlacing.value, snap: snapReal.value, tramSnap: snapRealTram.value, streets: snapStreets.value, roads: snapRoads.value, beside: snapBeside.value, besideSpacing: besideSpacing.value, design: designSpeed.value, fly: flyoverSpeed.value, advanced: buildAdvanced.value, platform: buildPlatform.value, tramPlatform: buildTramPlatform.value, oneTrack: stationOneTrack.value }, guide: guideFinished.value, v: VERSION };
   try {
     localStorage.setItem(STORE, JSON.stringify(s));
   } catch {

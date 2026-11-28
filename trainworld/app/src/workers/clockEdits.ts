@@ -549,6 +549,7 @@ export function routeArgs(a: TrackApi, r: RouteAsk): [Float64Array, Float64Array
   a.set_route_street(new Float64Array(r.tram && r.street ? r.streetLine ?? [] : []));
   a.set_route_hsr(!!r.hsr);
   a.set_route_ramp(!!r.ramp);
+  a.set_route_beside_spacing(r.besideSpacing ?? 12);
   a.set_route_beside(...besideOf(r));
   a.set_route_join(new Float64Array((r.join ?? [null, null, null, null]).map((v) => v ?? NaN)));
   // T-3092: with ramps on, new junctions on double track are laid as flyovers

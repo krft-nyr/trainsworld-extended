@@ -13,7 +13,7 @@ import { buildMode } from "../game/buildMode";
 import { linesByNum, world } from "../game/world";
 import { CAR_M, stepPlatform } from "../game/boarding";
 import { carsText } from "./inspector/schedule";
-import { autoRamp, buildAdvanced, buildLevel, buildPlatform, buildTramPlatform, clampDesign, DESIGN_SPEEDS, designSpeed, flyoverSpeed, keepPlacing, lineDraft, quadTrack, setDoubleTrack, setQuadTrack, setSingleTrack, setTrackType, singleTrack, shade, besideOn, snapBeside, snapReal, snapRealTram, snapRoads, snapStreets, stationOnTram, stationOneTrack, TRAM_PLATFORM, tool, trackType, type TrackType } from "../game/ui";
+import { autoRamp, buildAdvanced, buildLevel, buildPlatform, buildTramPlatform, clampDesign, DESIGN_SPEEDS, designSpeed, flyoverSpeed, keepPlacing, lineDraft, quadTrack, setDoubleTrack, setQuadTrack, setSingleTrack, setTrackType, singleTrack, shade, besideOn, besideSpacing, clampBesideSpacing, snapBeside, snapReal, snapRealTram, snapRoads, snapStreets, stationOnTram, stationOneTrack, TRAM_PLATFORM, tool, trackType, type TrackType } from "../game/ui";
 import { costBackground } from "../map/trackTagRows";
 import { levelTip, multText, trackMult, unitPrice, upkeepAt } from "./trackPrice";
 import { Icon, LevelButtons, Segmented, Stepper, TrackCountButtons } from "./widgets";
@@ -152,6 +152,15 @@ function TrackBar() {
         </div>
         {!tram && adv && <div class="tb-row tb-wide tb-adv-row">
           <AdvancedSettings />
+        </div>}
+        {besideOn.value && <div class="tb-row tb-beside-row">
+          <span>{t("toolBar.besideSpacing")}</span>
+          <Stepper value={`${besideSpacing.value} m`} label={t("toolBar.besideSpacing")} onStep={(s) => {
+            const next = clampBesideSpacing(besideSpacing.peek() + s);
+            if (next === besideSpacing.peek()) return false;
+            besideSpacing.value = next;
+            return undefined;
+          }} type={{ text: String(besideSpacing.value), set: (n) => { besideSpacing.value = clampBesideSpacing(n); } }} />
         </div>}
       </div>
       {open === "level" && (

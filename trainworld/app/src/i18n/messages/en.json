@@ -2248,6 +2248,7 @@
   "toolBar.ramp": "Ramp over track you cross",
   "toolBar.rampTip": "Try to ramp over track you cross at the same level and build new junctions as flyovers",
   "toolBar.regular": "Regular",
+  "toolBar.besideSpacing": "Track spacing",
   "toolBar.snapBeside": "Snap beside track",
   "toolBar.snapBesideTip": "Snap beside track\nHover over the blue region to draw track parallel to another track",
   "toolBar.snapReal": "Snap to real world network",

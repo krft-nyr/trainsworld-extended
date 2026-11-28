@@ -5,13 +5,13 @@ use super::*;
 
 /// Pieces walked from the start's piece, all told, looking for the end's.
 const BESIDE_WALK: usize = 400;
-/// Centre line to centre line between track and a route drawn beside it, m (T-1685; T-1895).
+/// Default centre-to-centre spacing between track and a route drawn beside it, m (T-1685; T-1895).
 pub const BESIDE_SPACING: f64 = 12.0;
 
 impl TrackApi {
     /// `route_op`'s ends and PIs for a route beside the run of track through piece `eb` (the one
     /// the end is beside), whether its start is on that run's line already, and the run's pieces.
-    /// That line is `BESIDE_SPACING` from the track, its corners concentric with the track's, on
+    /// That line is `route_beside_spacing` from the track, its corners concentric with the track's, on
     /// the start's side (T-1895: never across the track), or the pointer's where the start is on
     /// the track or is open ground near the line. A start on the line (within half the spacing of
     /// it) runs along it to the end, an open-ground start moving onto it. Any other start comes in
@@ -49,13 +49,13 @@ impl TrackApi {
             (pa, pb) = (place(&f, a.0, a.1), place(&f, b.0, b.1));
         }
         let k = kk(scaled, a.1);
-        let gap = BESIDE_SPACING * k;
+        let gap = self.route_beside_spacing * k;
         let da = pa.1.abs();
         let on_line = (da - gap).abs() <= gap / 2.0 || !a.2 && da <= gap * 3.0;
         let sign = |o: f64| if o >= 0.0 { 1.0 } else { -1.0 };
         let side = if da > gap / 2.0 && (a.2 || !on_line) { sign(pa.1) } else { sign(pb.1) };
         // `express_verts` takes the spacing as a multiple of the quad's
-        let scale = side * BESIDE_SPACING / QUAD_SPACING;
+        let scale = side * self.route_beside_spacing / QUAD_SPACING;
         let level = ends[9] as i8;
         // the line from chainage `from` to the end, and its own ends
         let line = |from: f64| -> Option<(Vec<Pi>, (f64, f64), (f64, f64))> {

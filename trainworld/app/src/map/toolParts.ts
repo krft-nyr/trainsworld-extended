@@ -48,8 +48,6 @@ export const HOLD_AT = 7;
 /** the worker's answer for a track tried this close to the pointer's spot stands for it (T-695) */
 export const KNOWN_PX = 16;
 export const LAYOUT_ISSUES = new Set(["PlatformTooLong", "PlatformStation", "PlatformJunction", "PlatformJoint", "PlatformCrossing", "StationPorts", "StationJunction"]);
-/** track drawn beside track, centre to centre (sim `BESIDE_SPACING`, T-1895) */
-export const BESIDE_SPACING_M = 12;
 /** each of double track's two tracks from its centre line once drawn apart, m (renderer.ts `LANE_M`, sim `LANE_HALF_M`) */
 export const LANE_HALF_M = 2;
 

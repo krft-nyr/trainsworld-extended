@@ -101,7 +101,7 @@ impl TrackApi {
                 // instead (a start on that track meets it there)
                 let scaled = self.w.net.frame().scaled();
                 let crossed = |verts: &[Pi]| {
-                    let skip = 0.5 * beside::BESIDE_SPACING * kk(scaled, verts[0].y);
+                    let skip = 0.5 * self.route_beside_spacing * kk(scaled, verts[0].y);
                     let on_run = run.iter().any(|&e| self.w.net.edge_ok(e) && self.w.net.project(e, verts[0].x, verts[0].y).1 < skip);
                     run.iter().any(|&e| self.w.net.edge_ok(e) && beside::route_crosses(verts, self.w.net.edge_pieces(e), scaled, if on_run { 2.0 * skip } else { 0.0 }))
                 };
@@ -880,6 +880,11 @@ impl TrackApi {
     /// anywhere may come in to the line. Used once.
     pub fn set_route_beside(&mut self, _from_edge: u32, to_edge: u32) {
         self.route_beside = (to_edge != u32::MAX).then_some(to_edge);
+    }
+
+    /// Centre-to-centre spacing of the next route beside track, metres (6-24, default 12).
+    pub fn set_route_beside_spacing(&mut self, metres: f64) {
+        self.route_beside_spacing = if metres.is_finite() { metres.clamp(6.0, 24.0) } else { beside::BESIDE_SPACING };
     }
 
     /// T-3137: which of double track's two tracks the next single-track route (preview or add)
